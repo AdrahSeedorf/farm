@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 430 110" width="430" height="110" role="img" aria-label="ADRAH FARMS">
+  <title>ADRAH FARMS — horizontal lock-up</title>
+  <g transform="translate(6,5)">
+    <path d="M50 5 C69 5 84 28 84 55 C84 77 69 95 50 95 C31 95 16 77 16 55 C16 28 31 5 50 5 Z" fill="#14532D"/>
+    <g fill="#B78628">
+      <circle cx="39" cy="37" r="6"/><circle cx="48" cy="33" r="6.8"/><circle cx="57" cy="36.5" r="5.6"/>
+    </g>
+    <path d="M60 49 L79 55.5 L60 62 Z" fill="#B78628"/>
+    <path d="M58 62 C64 62 65 72 58 74 C54 75 52 70 53 66 Z" fill="#B78628"/>
+    <circle cx="47" cy="55" r="15.5" fill="#F7F5EF"/>
+    <circle cx="53" cy="49.5" r="2.8" fill="#14532D"/>
+  </g>
+  <text x="112" y="59" font-family="Outfit, 'Avenir Next', 'Helvetica Neue', Arial, sans-serif"
+        font-size="43" font-weight="700" letter-spacing="1.5" fill="#14532D">ADRAH</text>
+  <text x="114" y="83" font-family="Outfit, 'Avenir Next', 'Helvetica Neue', Arial, sans-serif"
+        font-size="17" font-weight="500" letter-spacing="8.8" fill="#B78628">FARMS</text>
+</svg>

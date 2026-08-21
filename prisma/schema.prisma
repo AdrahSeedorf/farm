@@ -1,0 +1,678 @@
+// ADRAH Farms — Platform schema
+// Milestone 0: structural core only. Production modules (health, feed, orders,
+// workforce) arrive in their own milestones and build on these foundations.
+//
+// THREE RULES GOVERN THIS SCHEMA. See README "Architectural rules".
+//   1. Population and stock are DERIVED from append-only event ledgers.
+//      There is no writable `population` or `quantityOnHand` column anywhere.
+//   2. Money is stored as INTEGER PESEWAS (GHS x 100). Never a float.
+//   3. Quantities are stored in a BASE UNIT with an explicit UnitOfMeasure.
+//
+// Nothing in the core is named Flock / Chicken / House / Egg. Those are
+// presentation terms resolved from SpeciesProfile.terminology.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+// Prisma 7: the connection URL lives in prisma.config.ts (for Migrate) and is
+// supplied to PrismaClient through a driver adapter at runtime. See src/lib/db.ts.
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// ORGANISATION & PHYSICAL STRUCTURE
+// Organisation -> Site -> ProductionUnit
+// ---------------------------------------------------------------------------
+
+model Organisation {
+  id        String   @id @default(cuid())
+  name      String
+  legalName String?
+  /// ISO 4217. Ghana Cedi by default; the money layer refuses mixed currencies.
+  currency  String   @default("GHS")
+  /// IANA timezone. Ghana has no DST.
+  timezone  String   @default("Africa/Accra")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sites           Site[]
+  users           User[]
+  speciesProfiles SpeciesProfile[]
+  items           Item[]
+  auditLogs       AuditLog[]
+}
+
+model Site {
+  id             String  @id @default(cuid())
+  organisationId String
+  name           String
+  code           String
+  region         String?
+  district       String?
+  town           String?
+  latitude       Float?
+  longitude      Float?
+  isActive       Boolean @default(true)
+
+  organisation    Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  productionUnits ProductionUnit[]
+  animalGroups    AnimalGroup[]
+  stockLocations  StockLocation[]
+  userSiteScopes  UserSiteScope[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, code])
+  @@index([organisationId])
+}
+
+/// A house, pen, pond or paddock. Deliberately not named "House".
+model ProductionUnit {
+  id       String  @id @default(cuid())
+  siteId   String
+  name     String
+  code     String
+  /// Nominal bird/animal capacity. Advisory only — never used to cap events.
+  capacity Int?
+  notes    String?
+  isActive Boolean @default(true)
+
+  site         Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  animalGroups AnimalGroup[]
+  dailyRecords DailyRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([siteId, code])
+  @@index([siteId])
+}
+
+// ---------------------------------------------------------------------------
+// SPECIES FRAMEWORK
+// Adding pigs/cattle/fish later is new ROWS here, not a schema migration.
+// ---------------------------------------------------------------------------
+
+model SpeciesProfile {
+  id             String @id @default(cuid())
+  organisationId String
+  /// Stable key used in code: "poultry", "swine", "cattle", "fish".
+  key            String
+  name           String
+  /// UI terminology map, e.g.
+  /// { "animalGroup": "Flock", "productionUnit": "House", "animal": "Bird" }
+  terminology    Json
+  isActive       Boolean @default(true)
+
+  organisation    Organisation            @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  productionTypes ProductionTypeProfile[]
+  animalGroups    AnimalGroup[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, key])
+}
+
+/// e.g. poultry -> "layer", "broiler", "breeder". Carries the metric set and
+/// target curves. Targets are CONFIGURATION, never hard-coded in application logic.
+model ProductionTypeProfile {
+  id               String @id @default(cuid())
+  speciesProfileId String
+  key              String
+  name             String
+  /// Which record types apply, e.g.
+  /// { "eggProduction": true, "weightSampling": true, "milkYield": false }
+  capabilities     Json
+  /// Breed standard curves and thresholds, e.g.
+  /// { "breed": "Isa Brown", "targetBodyWeightByAgeDays": {...},
+  ///   "targetHenDayByAgeWeeks": {...}, "mortalityAlertPctDaily": 0.5 }
+  standards        Json?
+
+  speciesProfile SpeciesProfile   @relation(fields: [speciesProfileId], references: [id], onDelete: Cascade)
+  lifecycleStages LifecycleStage[]
+  animalGroups   AnimalGroup[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([speciesProfileId, key])
+}
+
+/// Configurable lifecycle: Brooding -> Growing -> Pre-lay -> Laying -> ...
+/// Drives which fields the daily record screen shows at a given flock age.
+model LifecycleStage {
+  id                      String @id @default(cuid())
+  productionTypeProfileId String
+  key                     String
+  name                    String
+  /// Ordering within the lifecycle.
+  sequence                Int
+  /// Advisory age window in days; used to prompt, never to force a transition.
+  typicalStartAgeDays     Int?
+  typicalEndAgeDays       Int?
+
+  productionType ProductionTypeProfile @relation(fields: [productionTypeProfileId], references: [id], onDelete: Cascade)
+  animalGroups   AnimalGroup[]
+  events         AnimalGroupEvent[]
+
+  @@unique([productionTypeProfileId, key])
+  @@index([productionTypeProfileId, sequence])
+}
+
+// ---------------------------------------------------------------------------
+// ANIMAL GROUPS  (flock / herd / batch / shoal)
+// ---------------------------------------------------------------------------
+
+model AnimalGroup {
+  id                      String  @id @default(cuid())
+  siteId                  String
+  productionUnitId        String?
+  speciesProfileId        String
+  productionTypeProfileId String
+
+  /// Human reference, e.g. "FLK-2027-01".
+  code                    String
+  name                    String?
+  breed                   String?
+  supplierName            String?
+
+  /// Date of hatch/birth — the basis for ALL age calculations. Not arrival date:
+  /// a flock delivered late is still the age it hatched.
+  dateOfHatch             DateTime  @db.Date
+  arrivalDate             DateTime? @db.Date
+
+  /// Denormalised CACHE of the latest STAGE_CHANGE event. The event ledger is
+  /// the source of truth; this column exists to keep list queries cheap and is
+  /// rebuildable with `npm run rebuild:derived`.
+  currentStageId          String?
+
+  closedAt                DateTime?
+  notes                   String?
+
+  site           Site                  @relation(fields: [siteId], references: [id])
+  productionUnit ProductionUnit?       @relation(fields: [productionUnitId], references: [id])
+  speciesProfile SpeciesProfile        @relation(fields: [speciesProfileId], references: [id])
+  productionType ProductionTypeProfile @relation(fields: [productionTypeProfileId], references: [id])
+  currentStage   LifecycleStage?       @relation(fields: [currentStageId], references: [id])
+
+  events        AnimalGroupEvent[]
+  snapshots     AnimalGroupSnapshot[]
+  weightSamples WeightSample[]
+  costEntries   FlockCostEntry[]
+  dailyRecords  DailyRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([siteId, code])
+  @@index([siteId, closedAt])
+  @@index([productionUnitId])
+}
+
+enum AnimalGroupEventType {
+  PLACEMENT
+  MORTALITY
+  CULL
+  SALE
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT
+  STAGE_CHANGE
+}
+
+/// THE POPULATION LEDGER. Append-only. Never updated, never deleted.
+/// A correction is a new ADJUSTMENT row with a reason — not an edit to history.
+model AnimalGroupEvent {
+  id            String               @id @default(cuid())
+  animalGroupId String
+  type          AnimalGroupEventType
+
+  /// SIGNED change in population. Deaths are negative, placements positive.
+  /// Set exclusively by `recordAnimalGroupEvent()` from (type, quantity) so the
+  /// sign can never disagree with the event type. STAGE_CHANGE carries delta 0.
+  delta         Int
+
+  occurredOn    DateTime @db.Date
+  /// Denormalised age in days at the time of the event, for fast cohort queries.
+  ageDays       Int?
+
+  /// Controlled vocabulary, e.g. "disease", "heat_stress", "predation",
+  /// "recount_correction". Enables cause analysis without free-text mining.
+  reasonCode    String?
+  notes         String?
+
+  /// Where this event came from — a daily record, a sale, a manual correction.
+  sourceType    String?
+  sourceId      String?
+
+  /// Set only on STAGE_CHANGE events.
+  toStageId     String?
+
+  recordedById  String
+  createdAt     DateTime @default(now())
+
+  animalGroup AnimalGroup     @relation(fields: [animalGroupId], references: [id], onDelete: Cascade)
+  recordedBy  User            @relation(fields: [recordedById], references: [id])
+  toStage     LifecycleStage? @relation(fields: [toStageId], references: [id])
+
+  @@index([animalGroupId, occurredOn])
+  @@index([animalGroupId, type])
+}
+
+/// Nightly materialised view of population and age. A CACHE ONLY.
+/// Safe to truncate and rebuild from AnimalGroupEvent at any time.
+model AnimalGroupSnapshot {
+  id            String   @id @default(cuid())
+  animalGroupId String
+  onDate        DateTime @db.Date
+  openingCount  Int
+  closingCount  Int
+  ageDays       Int
+  computedAt    DateTime @default(now())
+
+  animalGroup AnimalGroup @relation(fields: [animalGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([animalGroupId, onDate])
+  @@index([onDate])
+}
+
+/// Body weight and uniformity. Core for layer rearing: uniformity at 16 weeks
+/// is the best available predictor of the laying cycle, and cannot be fixed later.
+model WeightSample {
+  id            String   @id @default(cuid())
+  animalGroupId String
+  takenOn       DateTime @db.Date
+  ageDays       Int
+  sampleSize    Int
+  /// Individual weights in GRAMS. Average and CV% are computed from these
+  /// (see src/lib/metrics.ts) rather than stored, so they can never drift.
+  weightsGrams  Int[]
+  /// Optional pre-aggregated average for imported or hand-tallied data where
+  /// individual weights were not captured.
+  averageGrams  Int?
+  recordedById  String
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  animalGroup AnimalGroup @relation(fields: [animalGroupId], references: [id], onDelete: Cascade)
+  recordedBy  User        @relation(fields: [recordedById], references: [id])
+
+  @@index([animalGroupId, takenOn])
+}
+
+enum FlockCostCategory {
+  STOCK_PURCHASE
+  FEED
+  HEALTH
+  LABOUR
+  UTILITIES
+  TRANSPORT
+  OTHER
+}
+
+/// Append-only cost ledger per group. Accumulates through the ~20-week rearing
+/// period so that "cost per point-of-lay pullet reared" is a fact, not an estimate.
+model FlockCostEntry {
+  id            String            @id @default(cuid())
+  animalGroupId String
+  category      FlockCostCategory
+  /// INTEGER PESEWAS. See src/lib/money.ts.
+  amountPesewas Int
+  incurredOn    DateTime          @db.Date
+  description   String?
+  sourceType    String?
+  sourceId      String?
+  recordedById  String
+  createdAt     DateTime          @default(now())
+
+  animalGroup AnimalGroup @relation(fields: [animalGroupId], references: [id], onDelete: Cascade)
+  recordedBy  User        @relation(fields: [recordedById], references: [id])
+
+  @@index([animalGroupId, incurredOn])
+  @@index([animalGroupId, category])
+}
+
+// ---------------------------------------------------------------------------
+// DAILY RECORD
+// The single most-used screen in the system. Phase-aware: which child records
+// are expected depends on the group's lifecycle stage.
+// ---------------------------------------------------------------------------
+
+model DailyRecord {
+  id               String   @id @default(cuid())
+  productionUnitId String
+  animalGroupId    String
+  onDate           DateTime @db.Date
+
+  /// Client-generated. The defence against duplicate submissions when a phone
+  /// retries over a bad connection. Unique — the second attempt is rejected,
+  /// never merged.
+  idempotencyKey   String   @unique
+
+  observations     String?
+
+  recordedById     String
+  verifiedById     String?
+  verifiedAt       DateTime?
+
+  productionUnit ProductionUnit @relation(fields: [productionUnitId], references: [id])
+  animalGroup    AnimalGroup    @relation(fields: [animalGroupId], references: [id], onDelete: Cascade)
+  recordedBy     User           @relation(fields: [recordedById], references: [id])
+  verifiedBy     User?          @relation("DailyRecordVerifier", fields: [verifiedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([animalGroupId, onDate])
+  @@index([productionUnitId, onDate])
+}
+
+// ---------------------------------------------------------------------------
+// UNITS OF MEASURE
+// Prevents the classic disaster where "180" means bags to one person and
+// kilograms to another.
+// ---------------------------------------------------------------------------
+
+enum UomDimension {
+  COUNT
+  MASS
+  VOLUME
+}
+
+model UnitOfMeasure {
+  id             String       @id @default(cuid())
+  /// "piece", "crate", "kg", "bag_50kg", "litre".
+  key            String       @unique
+  name           String
+  symbol         String
+  dimension      UomDimension
+  /// Multiply by this to reach the dimension's base unit
+  /// (COUNT -> piece, MASS -> kg, VOLUME -> litre).
+  /// crate = 30, bag_50kg = 50, tonne = 1000.
+  factorToBase   Float
+  isBase         Boolean      @default(false)
+
+  items          Item[]
+  stockMovements StockMovement[]
+
+  @@index([dimension])
+}
+
+// ---------------------------------------------------------------------------
+// INVENTORY — same ledger discipline as population
+// ---------------------------------------------------------------------------
+
+enum ItemCategory {
+  FEED
+  VACCINE
+  MEDICINE
+  DISINFECTANT
+  PACKAGING
+  FUEL
+  PPE
+  EQUIPMENT
+  SPARE_PART
+  FINISHED_PRODUCT
+  OTHER
+}
+
+model Item {
+  id             String       @id @default(cuid())
+  organisationId String
+  sku            String
+  name           String
+  category       ItemCategory
+  /// The unit this item's stock is COUNTED in. Movements are stored converted
+  /// to the dimension's base unit; this is the display/entry preference.
+  stockUomId     String
+  /// Advisory thresholds for the alert engine. Nullable = no alerting.
+  reorderLevel   Float?
+  minimumStock   Float?
+  isPerishable   Boolean      @default(false)
+  isActive       Boolean      @default(true)
+
+  organisation Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  stockUom     UnitOfMeasure   @relation(fields: [stockUomId], references: [id])
+  batches      ItemBatch[]
+  movements    StockMovement[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, sku])
+  @@index([organisationId, category])
+}
+
+/// Batch/lot with expiry. Vaccines and medicines must never be issued expired.
+model ItemBatch {
+  id                String    @id @default(cuid())
+  itemId            String
+  batchNumber       String
+  expiresOn         DateTime? @db.Date
+  /// INTEGER PESEWAS per base unit, captured at receipt. This is what makes
+  /// flock costing accurate rather than an average guess.
+  unitCostPesewas   Int?
+  receivedOn        DateTime  @db.Date
+
+  item      Item            @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  movements StockMovement[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([itemId, batchNumber])
+  @@index([expiresOn])
+}
+
+model StockLocation {
+  id       String  @id @default(cuid())
+  siteId   String
+  name     String
+  code     String
+  isActive Boolean @default(true)
+
+  site      Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  movements StockMovement[]
+
+  @@unique([siteId, code])
+}
+
+enum StockMovementType {
+  PURCHASE_RECEIPT
+  ISSUE
+  RETURN
+  TRANSFER_IN
+  TRANSFER_OUT
+  ADJUSTMENT
+  DAMAGE
+  EXPIRY
+  SALE
+  PRODUCTION
+  CONSUMPTION
+}
+
+/// THE STOCK LEDGER. Append-only, exactly like the population ledger.
+/// `quantityOnHand` is a query over this table, never a column.
+model StockMovement {
+  id              String            @id @default(cuid())
+  itemId          String
+  itemBatchId     String?
+  stockLocationId String
+  type            StockMovementType
+
+  /// SIGNED quantity IN THE DIMENSION'S BASE UNIT (kg, piece, litre).
+  /// Set exclusively by `recordStockMovement()`. Receipts positive, issues negative.
+  deltaBase       Float
+  /// What the user actually typed and in which unit, kept for audit and display:
+  /// "4 bags" stays legible as "4 bags", not 200 kg.
+  enteredQuantity Float
+  enteredUomId    String
+
+  occurredOn      DateTime @db.Date
+  reasonCode      String?
+  notes           String?
+  sourceType      String?
+  sourceId        String?
+
+  recordedById    String
+  createdAt       DateTime @default(now())
+
+  item          Item          @relation(fields: [itemId], references: [id])
+  itemBatch     ItemBatch?    @relation(fields: [itemBatchId], references: [id])
+  stockLocation StockLocation @relation(fields: [stockLocationId], references: [id])
+  enteredUom    UnitOfMeasure @relation(fields: [enteredUomId], references: [id])
+  recordedBy    User          @relation(fields: [recordedById], references: [id])
+
+  @@index([itemId, occurredOn])
+  @@index([stockLocationId, itemId])
+  @@index([itemBatchId])
+}
+
+// ---------------------------------------------------------------------------
+// IDENTITY & ACCESS
+// Permissions are `resource:action` strings. Roles bundle them. Access is
+// additionally scoped to sites. Enforcement lives in ONE server-side gate.
+// ---------------------------------------------------------------------------
+
+model User {
+  id             String    @id @default(cuid())
+  organisationId String
+  /// Office and customer users sign in with email.
+  email          String?   @unique
+  /// Farm staff sign in with phone + PIN — many farmhands have no email address.
+  /// E.164, e.g. +233241234567. Wired up at Milestone 12, when staff exist.
+  phone          String?   @unique
+  name           String
+  passwordHash   String?
+  pinHash        String?
+  isActive       Boolean   @default(true)
+  /// Forces a password change on next sign-in. Set on seeded and admin-created
+  /// accounts so a default credential can never quietly become permanent.
+  mustChangePassword Boolean @default(false)
+  lastLoginAt    DateTime?
+
+  organisation Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  roles        UserRole[]
+  siteScopes   UserSiteScope[]
+
+  animalGroupEvents  AnimalGroupEvent[]
+  weightSamples      WeightSample[]
+  flockCostEntries   FlockCostEntry[]
+  stockMovements     StockMovement[]
+  dailyRecords       DailyRecord[]
+  verifiedRecords    DailyRecord[]      @relation("DailyRecordVerifier")
+  auditLogs          AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organisationId])
+}
+
+model Role {
+  id          String  @id @default(cuid())
+  /// "owner", "manager", "supervisor", "worker", "storekeeper", "sales", "customer".
+  key         String  @unique
+  name        String
+  description String?
+  /// System roles cannot be deleted, only extended.
+  isSystem    Boolean @default(false)
+
+  permissions RolePermission[]
+  users       UserRole[]
+}
+
+model Permission {
+  id          String  @id @default(cuid())
+  /// "flock:create", "finance:view", "inventory:adjust".
+  key         String  @unique
+  resource    String
+  action      String
+  description String?
+
+  roles RolePermission[]
+
+  @@index([resource])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserRole {
+  userId String
+  roleId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+/// Absence of rows = access to every site (the owner). Presence of rows =
+/// access restricted to exactly those sites.
+model UserSiteScope {
+  userId String
+  siteId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@id([userId, siteId])
+}
+
+/// Sign-in attempts, successful and failed.
+///
+/// Backs rate limiting: too many failures against one email, or from one IP,
+/// locks further attempts for a cooling-off period. Kept in the database rather
+/// than in process memory deliberately — an in-memory counter resets on every
+/// deploy and is per-instance, which on serverless means effectively no limit
+/// at all.
+model LoginAttempt {
+  id         String   @id @default(cuid())
+  /// Lowercased email, phone, or IP address — whatever is being limited.
+  identifier String
+  successful Boolean
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([identifier, createdAt])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// AUDIT
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organisationId String
+  actorId        String?
+  /// "price.change", "stock.adjust", "population.adjust", "permission.change".
+  action         String
+  entityType     String
+  entityId       String
+  /// Only the fields that changed, not the whole row.
+  before         Json?
+  after          Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  actor        User?        @relation(fields: [actorId], references: [id])
+
+  @@index([organisationId, createdAt])
+  @@index([entityType, entityId])
+}

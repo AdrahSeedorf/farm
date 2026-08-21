@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+/**
+ * ADRAH Farms — design tokens
+ *
+ * Every colour, radius and size in the application resolves to a token defined
+ * here. No component contains a literal hex value. A brand change is therefore
+ * a one-file change, and the public site, the dashboard and the staff app can
+ * never drift apart into three different-looking products.
+ *
+ * Source of truth: the ADRAH Farms Brand & Design System document.
+ */
+
+@theme {
+  /* --- Brand ------------------------------------------------------------ */
+  --color-brand-primary: #14532d;      /* Forest green — nav, primary buttons, the mark */
+  --color-brand-primary-hover: #1b6b3a;
+  --color-brand-primary-soft: #dce9e0;
+  --color-brand-accent: #b78628;       /* Warm gold — accents, secondary CTA */
+  --color-brand-accent-soft: #f6eedc;
+  /* Gold is only 3:1 on light backgrounds. THIS is the gold for text on green. */
+  --color-brand-accent-on-dark: #e8c46a;
+
+  /* --- Surfaces --------------------------------------------------------- */
+  --color-surface-page: #f7f5ef;       /* Bone — warmer and easier on the eye than white */
+  --color-surface-card: #ffffff;
+  --color-surface-sunken: #ede9de;
+  --color-border-default: #e4e0d6;
+  --color-border-strong: #d3cdbe;
+
+  /* --- Text ------------------------------------------------------------- */
+  --color-text-primary: #1c1917;       /* Warm black, never pure #000 */
+  --color-text-secondary: #57534e;
+  --color-text-muted: #8a8279;
+  --color-text-inverse: #f7f5ef;
+
+  /* --- Status ----------------------------------------------------------- *
+   * The dashboard is green-branded, so green cannot also mean "good" — it
+   * would vanish into the furniture. Normal is NEUTRAL and uncoloured; colour
+   * is reserved for exceptions. A screen with no colour on it is a farm with
+   * nothing wrong.                                                          */
+  --color-status-attention: #b78628;   /* Reorder soon, vaccination due, task overdue */
+  --color-status-attention-bg: #fdf8ec;
+  --color-status-critical: #b3261e;    /* Mortality spike, stockout, biosecurity breach */
+  --color-status-critical-bg: #fdf0ef;
+  --color-status-positive: #2f7a4f;    /* Improvement indicators only — never a background */
+
+  /* --- Type ------------------------------------------------------------- */
+  /* --font-outfit is set by next/font/local once Outfit is self-hosted; until
+     then the stack falls through to the documented fallbacks. See layout.tsx. */
+  --font-sans: var(--font-outfit, "Outfit"), "Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* --- Shape ------------------------------------------------------------ */
+  --radius-card: 14px;
+  --radius-control: 10px;
+
+  /* --- Touch ------------------------------------------------------------ *
+   * Minimum tap target in the staff app. A farmhand records mortality with one
+   * hand, in a poultry house, possibly wearing gloves.                       */
+  --spacing-touch: 48px;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-surface-page);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Every figure in this system sits in a column that will be compared with
+   another figure. Proportional digits make columns ragged and make 1,712 look
+   like 7,112 at a glance. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
