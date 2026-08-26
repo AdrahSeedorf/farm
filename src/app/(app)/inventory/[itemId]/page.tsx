@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { pageGuard, currentUserCan } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
-import { itemById, itemBatches, itemMovements, itemOnHand } from '@/lib/stock-service';
+import { itemById, itemBatches, itemMovements, itemOnHand, stockOverview } from '@/lib/stock-service';
 import {
   expiredBatches,
   expiringSoon,
@@ -14,6 +14,7 @@ import { BASE_UNIT, formatQuantity } from '@/lib/uom';
 import { formatGHS, pesewas } from '@/lib/money';
 import { CATEGORY_META, type ItemCategory } from '@/lib/validation/item';
 import { StatusPill } from '../StatusPill';
+import { WriteOffButton } from '../WriteOffButton';
 
 export const metadata: Metadata = { title: 'Item' };
 
@@ -41,13 +42,18 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
   const item = await itemById(principal, itemId);
   if (!item) notFound();
 
-  const [batches, movements, totalOnHand, canEdit, canReceive] = await Promise.all([
-    itemBatches(principal, itemId),
-    itemMovements(principal, itemId),
-    itemOnHand(principal, itemId),
-    currentUserCan('inventory:edit'),
-    currentUserCan('inventory:create'),
-  ]);
+  const [batches, movements, totalOnHand, overview, canEdit, canReceive, canWriteOff] =
+    await Promise.all([
+      itemBatches(principal, itemId),
+      itemMovements(principal, itemId),
+      itemOnHand(principal, itemId),
+      stockOverview(principal),
+      currentUserCan('inventory:edit'),
+      currentUserCan('inventory:create'),
+      currentUserCan('inventory:approve'),
+    ]);
+
+  const cover = overview.find((o) => o.id === itemId);
 
   const base = BASE_UNIT[item.stockUom.dimension as 'COUNT' | 'MASS' | 'VOLUME'];
   const show = (quantity: number) => formatQuantity(quantity, base, item.stockUom.key);
@@ -97,7 +103,7 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
         </div>
       </div>
 
-      <dl className="mt-6 grid gap-4 sm:grid-cols-3">
+      <dl className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-card border border-border-default bg-surface-card p-4">
           <dt className="text-[12px] font-bold uppercase tracking-[0.14em] text-text-muted">
             On hand
@@ -124,6 +130,22 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
         </div>
         <div className="rounded-card border border-border-default bg-surface-card p-4">
           <dt className="text-[12px] font-bold uppercase tracking-[0.14em] text-text-muted">
+            Days of cover
+          </dt>
+          <dd className="tabular mt-1 text-xl font-bold text-text-primary">
+            {cover?.daysOfCover == null
+              ? '—'
+              : `${Math.round(cover.daysOfCover * 10) / 10} days`}
+          </dd>
+          <dd className="mt-1.5 text-[13px] text-text-secondary">
+            {cover?.sentence ?? 'No usage recorded.'}
+            {cover?.runsOut
+              ? ` Runs out around ${day(cover.runsOut)}.`
+              : ''}
+          </dd>
+        </div>
+        <div className="rounded-card border border-border-default bg-surface-card p-4">
+          <dt className="text-[12px] font-bold uppercase tracking-[0.14em] text-text-muted">
             Value on hand
           </dt>
           <dd className="tabular mt-1 text-xl font-bold text-text-primary">
@@ -138,11 +160,26 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
       </dl>
 
       {expired.length > 0 ? (
-        <p className="mt-6 rounded-control border border-status-critical bg-status-critical-bg px-4 py-3 text-[14px] font-medium text-status-critical">
-          {expired.length} batch{expired.length === 1 ? '' : 'es'} past the expiry date with stock
-          still recorded: {expired.map((b) => b.batchNumber).join(', ')}. Write it off so the figure
-          matches the store.
-        </p>
+        <div className="mt-6 rounded-control border border-status-critical bg-status-critical-bg px-4 py-3">
+          <p className="text-[14px] font-medium text-status-critical">
+            {expired.length} batch{expired.length === 1 ? '' : 'es'} past the expiry date with
+            stock still recorded. Until this is written off, the figure above says the farm holds
+            something it cannot use.
+          </p>
+          <ul className="mt-2 space-y-2">
+            {expired.map((b) => (
+              <li key={b.id} className="flex flex-wrap items-center gap-2 text-[13px]">
+                <span className="font-mono text-status-critical">{b.batchNumber}</span>
+                <span className="text-status-critical">
+                  expired {day(b.expiresOn!)} · {show(b.onHand)} on hand
+                </span>
+                {canWriteOff ? (
+                  <WriteOffButton itemId={item.id} batchId={b.id} batchNumber={b.batchNumber} />
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
       {soon.length > 0 ? (
         <p className="mt-3 rounded-control border border-status-attention bg-status-attention-bg px-4 py-3 text-[14px] font-medium text-status-attention">

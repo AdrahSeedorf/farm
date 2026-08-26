@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { KpiTile, metric } from '@/components/ui/KpiTile';
 import { pageGuard, currentUserCan } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
@@ -7,11 +8,10 @@ import {
   dailyMortalityPct,
   henDayProductionPct,
   saleableRatePct,
-  daysOfFeedRemaining,
-  feedIntakePerBirdGrams,
   round,
 } from '@/lib/metrics';
-import { splitIntoContainers } from '@/lib/uom';
+import { splitIntoContainers, BASE_UNIT, formatQuantity } from '@/lib/uom';
+import { stockOverview } from '@/lib/stock-service';
 
 export const metadata: Metadata = { title: 'Dashboard' };
 
@@ -25,14 +25,20 @@ export const metadata: Metadata = { title: 'Dashboard' };
  * operational figures and no money at all.
  */
 
+/**
+ * SAMPLE PRODUCTION FIGURES, clearly labelled as such on screen.
+ *
+ * The stock tiles below are now real — they read the ledger. These are not, and
+ * showing a fabricated number next to a real one without saying which is which
+ * is how someone ends up ordering feed against an invented figure. They are
+ * replaced by real flock data at the reporting milestone.
+ */
 const SAMPLE = {
   openingPopulation: 1950,
   closingPopulation: 1946,
   deathsToday: 4,
   eggsCollected: 1712,
   saleableEggs: 1681,
-  feedConsumedKg: 214,
-  feedOnHandKg: 1750,
 };
 
 export default async function DashboardPage() {
@@ -41,9 +47,22 @@ export default async function DashboardPage() {
   const { principal, allowed } = await pageGuard('report:view');
   if (!allowed) return <Forbidden area="the farm dashboard" roles={principal.roles} />;
 
-  const canSeeFinance = await currentUserCan('finance:view');
+  const [canSeeFinance, canSeeStock] = await Promise.all([
+    currentUserCan('finance:view'),
+    currentUserCan('inventory:view'),
+  ]);
 
-  const avgBirds = (SAMPLE.openingPopulation + SAMPLE.closingPopulation) / 2;
+  // Real figures, off the ledger. Empty for a role with no inventory access.
+  const stock = canSeeStock ? await stockOverview(principal) : [];
+  const tightest = [...stock]
+    .filter((s) => s.daysOfCover !== null)
+    .sort((a, b) => (a.daysOfCover ?? 0) - (b.daysOfCover ?? 0))[0];
+  const needsOrdering = stock.filter(
+    (s) => s.urgency === 'OUT' || s.urgency === 'CRITICAL' || s.urgency === 'LOW',
+  );
+  const expired = stock.filter((s) => s.expired.length > 0);
+  const expiring = stock.filter((s) => s.expired.length === 0 && s.expiringSoon.length > 0);
+
   const mortality = dailyMortalityPct(SAMPLE.deathsToday, SAMPLE.openingPopulation);
   const henDay = henDayProductionPct(
     SAMPLE.eggsCollected,
@@ -51,15 +70,14 @@ export default async function DashboardPage() {
     SAMPLE.closingPopulation,
   );
   const saleable = saleableRatePct(SAMPLE.saleableEggs, SAMPLE.eggsCollected);
-  const feedDays = daysOfFeedRemaining(SAMPLE.feedOnHandKg, SAMPLE.feedConsumedKg);
-  const intake = feedIntakePerBirdGrams(SAMPLE.feedConsumedKg, avgBirds);
   const crates = splitIntoContainers(SAMPLE.eggsCollected, 'crate');
 
   return (
     <main className="mx-auto max-w-6xl px-5 py-8">
       <h1 className="text-2xl font-bold text-text-primary">Today</h1>
       <p className="mt-1 text-[15px] text-text-secondary">
-        Normal is uncoloured — colour marks the exceptions only.
+        Normal is uncoloured — colour marks the exceptions only. Stock figures are live;
+        the production figures are still sample data until the reporting milestone.
       </p>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -90,22 +108,107 @@ export default async function DashboardPage() {
           value={metric(round(saleable), { decimals: 1, suffix: '%' })}
           detail={`${metric(SAMPLE.saleableEggs)} of ${metric(SAMPLE.eggsCollected)}`}
         />
-        <KpiTile
-          label="Feed used today"
-          value={`${metric(SAMPLE.feedConsumedKg)} kg`}
-          detail={`${metric(round(intake))} g per bird`}
-        />
-        <KpiTile
-          label="Feed cover"
-          value={`${metric(round(feedDays), { decimals: 1 })} days`}
-          detail="Reorder layer mash"
-          status="attention"
-          formula="feed on hand ÷ rolling daily use"
-        />
+        {canSeeStock ? (
+          <KpiTile
+            label="Tightest cover"
+            value={
+              tightest?.daysOfCover == null
+                ? '—'
+                : `${metric(round(tightest.daysOfCover), { decimals: 1 })} days`
+            }
+            detail={tightest ? tightest.name : 'Nothing being used yet'}
+            status={
+              tightest?.urgency === 'OUT' || tightest?.urgency === 'CRITICAL'
+                ? 'critical'
+                : tightest?.urgency === 'LOW'
+                  ? 'attention'
+                  : undefined
+            }
+            formula="stock on hand ÷ the last 7 days’ rate of use"
+          />
+        ) : null}
+        {canSeeStock ? (
+          <KpiTile
+            label="Needs ordering"
+            value={metric(needsOrdering.length)}
+            detail={
+              needsOrdering.length === 0
+                ? 'Nothing inside its lead time'
+                : needsOrdering
+                    .slice(0, 2)
+                    .map((s) => s.name)
+                    .join(', ')
+            }
+            status={needsOrdering.length > 0 ? 'attention' : undefined}
+          />
+        ) : null}
         {canSeeFinance ? (
           <KpiTile label="Sales today" value="GHS —" detail="Milestone 15" />
         ) : null}
       </div>
+
+      {canSeeStock && (needsOrdering.length > 0 || expired.length > 0 || expiring.length > 0) ? (
+        <section className="mt-10 rounded-card border border-border-default bg-surface-card p-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 className="text-[12px] font-semibold uppercase tracking-[0.16em] text-brand-accent">
+              The store needs attention
+            </h2>
+            <Link href="/inventory" className="text-[14px] font-semibold text-brand-primary">
+              Open the store
+            </Link>
+          </div>
+
+          <ul className="mt-4 divide-y divide-border-default">
+            {expired.map((s) => (
+              <li key={`x-${s.id}`} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2.5">
+                <Link
+                  href={`/inventory/${s.id}`}
+                  className="text-[15px] font-semibold text-text-primary hover:text-brand-primary"
+                >
+                  {s.name}
+                </Link>
+                <span className="text-[14px] font-medium text-status-critical">
+                  {s.expired.length} expired batch
+                  {s.expired.length === 1 ? '' : 'es'} still counted as stock
+                </span>
+              </li>
+            ))}
+            {needsOrdering.map((s) => (
+              <li key={`o-${s.id}`} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2.5">
+                <Link
+                  href={`/inventory/${s.id}`}
+                  className="text-[15px] font-semibold text-text-primary hover:text-brand-primary"
+                >
+                  {s.name}
+                </Link>
+                <span className="tabular text-[14px] text-text-secondary">
+                  {formatQuantity(s.onHandBase, BASE_UNIT[s.dimension], s.unitKey)} left
+                </span>
+                <span
+                  className={`text-[14px] ${
+                    s.urgency === 'LOW' ? 'text-status-attention' : 'font-medium text-status-critical'
+                  }`}
+                >
+                  {s.sentence}
+                </span>
+              </li>
+            ))}
+            {expiring.map((s) => (
+              <li key={`e-${s.id}`} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2.5">
+                <Link
+                  href={`/inventory/${s.id}`}
+                  className="text-[15px] font-semibold text-text-primary hover:text-brand-primary"
+                >
+                  {s.name}
+                </Link>
+                <span className="text-[14px] text-status-attention">
+                  Expiring soon: {s.expiringSoon.map((b) => b.batchNumber).join(', ')}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <section className="mt-10 rounded-card border border-border-default bg-surface-card p-6">
         <h2 className="text-[12px] font-semibold uppercase tracking-[0.16em] text-brand-accent">

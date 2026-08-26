@@ -2,7 +2,25 @@ import 'server-only';
 import { db } from '@/lib/db';
 import type { Principal } from '@/lib/rbac';
 import { orgFilter, siteIdFilter, hasFullSiteAccess } from '@/lib/scope';
-import { stockStatus, type BatchStock, type StockStatus } from '@/lib/stock-ledger';
+import {
+  daysOfCover,
+  expiredBatches,
+  expiringSoon,
+  stockStatus,
+  type BatchStock,
+  type StockStatus,
+} from '@/lib/stock-ledger';
+import {
+  coverSentence,
+  coverUrgency,
+  runsOutOn,
+  usageRate,
+  DEFAULT_LEAD_TIME_DAYS,
+  DEFAULT_WINDOW_DAYS,
+  USAGE_MOVEMENTS,
+  type CoverUrgency,
+  type UsageRate,
+} from '@/lib/stock-cover';
 import { fromBase, type Dimension } from '@/lib/uom';
 
 /**
@@ -102,6 +120,107 @@ export async function listItemsWithStock(
       minimumStockBase: item.minimumStock,
       status: stockStatus(onHandBase, item.reorderLevel, item.minimumStock),
       movementCount: countByItem.get(item.id) ?? 0,
+    };
+  });
+}
+
+export interface StockOverviewRow extends ItemRow {
+  /** Null when there is too little history to divide by. */
+  rate: UsageRate | null;
+  /** Null when nothing is being used, or nothing is on hand. */
+  daysOfCover: number | null;
+  runsOut: Date | null;
+  urgency: CoverUrgency;
+  sentence: string;
+  expired: BatchStock[];
+  expiringSoon: BatchStock[];
+}
+
+/**
+ * The whole store, with cover and expiry worked out.
+ *
+ * FIVE queries regardless of how many items there are. The shape to avoid is
+ * the obvious one — fetch the items, then for each ask "how much is left, how
+ * fast is it going, what is expiring" — which is three round trips per row and
+ * turns a fifty-item store into a hundred and fifty sequential waits on a
+ * database in Europe.
+ */
+export async function stockOverview(
+  principal: Principal,
+  asOf: Date = new Date(),
+  options: { windowDays?: number; leadTimeDays?: number; expiryHorizonDays?: number } = {},
+): Promise<StockOverviewRow[]> {
+  const windowDays = options.windowDays ?? DEFAULT_WINDOW_DAYS;
+  const leadTimeDays = options.leadTimeDays ?? DEFAULT_LEAD_TIME_DAYS;
+  const horizon = options.expiryHorizonDays ?? 60;
+
+  const windowStart = new Date(
+    Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate()) -
+      (windowDays - 1) * 86_400_000,
+  );
+
+  const [items, used, firstSeen, batches, batchSums] = await Promise.all([
+    listItemsWithStock(principal),
+    db.stockMovement.groupBy({
+      by: ['itemId'],
+      where: {
+        ...movementScope(principal),
+        type: { in: [...USAGE_MOVEMENTS] },
+        occurredOn: { gte: windowStart },
+      },
+      _sum: { deltaBase: true },
+    }),
+    db.stockMovement.groupBy({
+      by: ['itemId'],
+      where: movementScope(principal),
+      _min: { occurredOn: true },
+    }),
+    db.itemBatch.findMany({ where: { item: orgFilter(principal) } }),
+    db.stockMovement.groupBy({
+      by: ['itemBatchId'],
+      where: { itemBatchId: { not: null }, ...movementScope(principal) },
+      _sum: { deltaBase: true },
+    }),
+  ]);
+
+  // Usage is stored as a NEGATIVE delta; flip the sign once, here, rather than
+  // leaving every caller to remember which way round it is.
+  const usedByItem = new Map(used.map((u) => [u.itemId, Math.abs(u._sum.deltaBase ?? 0)]));
+  const firstByItem = new Map(firstSeen.map((f) => [f.itemId, f._min.occurredOn]));
+  const onHandByBatch = new Map(batchSums.map((b) => [b.itemBatchId, b._sum.deltaBase ?? 0]));
+
+  const batchesByItem = new Map<string, BatchStock[]>();
+  for (const b of batches) {
+    const list = batchesByItem.get(b.itemId) ?? [];
+    list.push({
+      id: b.id,
+      batchNumber: b.batchNumber,
+      expiresOn: b.expiresOn,
+      onHand: onHandByBatch.get(b.id) ?? 0,
+      unitCostPesewas: b.unitCostPesewas,
+    });
+    batchesByItem.set(b.itemId, list);
+  }
+
+  return items.map((item) => {
+    const rate = usageRate(
+      usedByItem.get(item.id) ?? 0,
+      firstByItem.get(item.id) ?? null,
+      asOf,
+      windowDays,
+    );
+    const cover = rate === null ? null : daysOfCover(item.onHandBase, rate.perDay);
+    const itemBatches = batchesByItem.get(item.id) ?? [];
+
+    return {
+      ...item,
+      rate,
+      daysOfCover: cover,
+      runsOut: runsOutOn(asOf, cover),
+      urgency: coverUrgency(cover, leadTimeDays),
+      sentence: coverSentence(cover, rate, leadTimeDays),
+      expired: expiredBatches(itemBatches, asOf),
+      expiringSoon: expiringSoon(itemBatches, asOf, horizon),
     };
   });
 }

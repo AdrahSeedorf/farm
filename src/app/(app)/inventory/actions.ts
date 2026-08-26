@@ -5,10 +5,11 @@ import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { requirePermission } from '@/lib/session';
 import { recordAudit } from '@/lib/audit';
-import { canAccessSite, orgFilter } from '@/lib/scope';
+import { canAccessSite, hasFullSiteAccess, orgFilter, siteIdFilter } from '@/lib/scope';
 import { AuthorizationError } from '@/lib/rbac';
 import { BASE_UNIT, toBase, formatQuantity, type Dimension } from '@/lib/uom';
 import { itemById, movementCountForItem } from '@/lib/stock-service';
+import { recordStockMovement, StockMovementError } from '@/lib/stock-movements';
 import {
   itemSchema,
   stockLocationSchema,
@@ -267,4 +268,120 @@ export async function createStockLocation(
 /** Entered in the item's unit, stored in the dimension's base unit. */
 function toBaseOrNull(quantity: number | null, unitKey: string): number | null {
   return quantity === null ? null : toBase(quantity, unitKey);
+}
+
+/**
+ * Write off a batch that is past its expiry date.
+ *
+ * WHY THIS EXISTS AT ALL. An expired batch that still shows stock is a lie the
+ * system tells every time anyone opens the page: the figure says the farm holds
+ * forty doses of vaccine it cannot legally or safely use. Warning about it
+ * without offering a way to correct it just teaches people to ignore the
+ * warning.
+ *
+ * The write-off is an EXPIRY movement, not a deletion. The stock was bought, it
+ * was held, and it was lost — all three facts stay on the ledger, which is what
+ * makes waste a number the farm can look at later rather than a gap.
+ *
+ * Requires `inventory:approve`, not `inventory:create`. Destroying value on
+ * paper is a heavier act than recording a delivery, and the role matrix already
+ * draws that line.
+ */
+export async function writeOffExpiredBatch(
+  itemId: string,
+  batchId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const principal = await requirePermission('inventory:approve');
+
+  // The intent is stated rather than implied, for the same reason archiving
+  // states it: a stray submit should do nothing, not destroy stock on paper.
+  if (formData.get('intent') !== 'writeOff') {
+    return { error: 'That request was not understood. Try again.' };
+  }
+
+  const item = await itemById(principal, itemId);
+  if (!item) return { error: 'That item no longer exists.' };
+
+  const batch = await db.itemBatch.findFirst({
+    where: { id: batchId, itemId, item: orgFilter(principal) },
+  });
+  if (!batch) return { error: 'That batch no longer exists.' };
+  if (!batch.expiresOn) {
+    return { error: `Batch ${batch.batchNumber} has no expiry date, so there is nothing to write off.` };
+  }
+
+  // A batch can sit in more than one store. Write off what each one actually
+  // holds rather than assuming it is all in the main store.
+  const holdings = await db.stockMovement.groupBy({
+    by: ['stockLocationId'],
+    where: { itemBatchId: batchId, ...movementScopeFor(principal) },
+    _sum: { deltaBase: true },
+  });
+
+  const toWriteOff = holdings
+    .map((h) => ({ locationId: h.stockLocationId, quantity: h._sum.deltaBase ?? 0 }))
+    .filter((h) => h.quantity > 0);
+
+  if (toWriteOff.length === 0) {
+    return { ok: `Batch ${batch.batchNumber} already shows nothing on hand.` };
+  }
+
+  let total = 0;
+  try {
+    for (const holding of toWriteOff) {
+      await recordStockMovement(principal, {
+        itemId,
+        stockLocationId: holding.locationId,
+        type: 'EXPIRY',
+        quantityEntered: holding.quantity,
+        enteredUomKey: BASE_UNIT[item.stockUom.dimension as Dimension],
+        occurredOn: startOfToday(),
+        itemBatchId: batchId,
+        reasonCode: 'expired',
+        notes: `Expired ${batch.expiresOn.toISOString().slice(0, 10)}`,
+      });
+      total += holding.quantity;
+    }
+  } catch (error) {
+    if (error instanceof StockMovementError) return { error: error.message };
+    throw error;
+  }
+
+  await recordAudit({
+    principal,
+    action: 'stock.writeOff',
+    entityType: 'ItemBatch',
+    entityId: batchId,
+    after: {
+      item: item.sku,
+      batch: batch.batchNumber,
+      expiredOn: batch.expiresOn.toISOString().slice(0, 10),
+      quantityBase: total,
+    },
+  });
+
+  revalidatePath('/inventory');
+  revalidatePath(`/inventory/${itemId}`);
+  return {
+    ok: `Wrote off ${formatQuantity(total, BASE_UNIT[item.stockUom.dimension as Dimension], item.stockUom.key)} from batch ${batch.batchNumber}.`,
+  };
+}
+
+/** Today at UTC midnight — the only shape of date this system stores. */
+function startOfToday(): Date {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+/** Movements at stores this principal may see. Mirrors `stock-service`. */
+function movementScopeFor(principal: Parameters<typeof orgFilter>[0]) {
+  return {
+    stockLocation: {
+      site: hasFullSiteAccess(principal)
+        ? orgFilter(principal)
+        : { ...orgFilter(principal), ...siteIdFilter(principal) },
+    },
+  };
 }

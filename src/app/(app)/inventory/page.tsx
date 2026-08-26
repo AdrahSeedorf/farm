@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { pageGuard, currentUserCan } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
-import { listItemsWithStock } from '@/lib/stock-service';
+import { stockOverview } from '@/lib/stock-service';
 import { hasFullSiteAccess } from '@/lib/scope';
 import { BASE_UNIT, formatQuantity } from '@/lib/uom';
 import { CATEGORY_META, type ItemCategory } from '@/lib/validation/item';
@@ -22,7 +22,9 @@ export default async function InventoryPage({
   const { show, created } = await searchParams;
   const includeInactive = show === 'all';
 
-  const items = await listItemsWithStock(principal, { includeInactive });
+  const items = (await stockOverview(principal)).filter(
+    (i) => includeInactive || i.isActive,
+  );
   const [canCreate, canEdit, canManage] = await Promise.all([
     currentUserCan('inventory:create'),
     currentUserCan('inventory:edit'),
@@ -150,11 +152,31 @@ export default async function InventoryPage({
                       </div>
                       <p className="mt-0.5 text-[13px] text-text-secondary">
                         Counted in {item.unitName.toLowerCase()}
-                        {item.isPerishable ? ' · expires' : ''}
                         {item.reorderLevelBase !== null
                           ? ` · reorder at ${formatQuantity(item.reorderLevelBase, BASE_UNIT[item.dimension], item.unitKey)}`
                           : ''}
                       </p>
+                      <p
+                        className={`mt-0.5 text-[13px] ${
+                          item.urgency === 'CRITICAL' || item.urgency === 'OUT'
+                            ? 'font-medium text-status-critical'
+                            : item.urgency === 'LOW'
+                              ? 'font-medium text-status-attention'
+                              : 'text-text-muted'
+                        }`}
+                      >
+                        {item.sentence}
+                      </p>
+                      {item.expired.length > 0 ? (
+                        <p className="mt-0.5 text-[13px] font-medium text-status-critical">
+                          {item.expired.length} expired batch
+                          {item.expired.length === 1 ? '' : 'es'} still counted as stock.
+                        </p>
+                      ) : item.expiringSoon.length > 0 ? (
+                        <p className="mt-0.5 text-[13px] text-status-attention">
+                          Expiring soon: {item.expiringSoon.map((b) => b.batchNumber).join(', ')}.
+                        </p>
+                      ) : null}
                     </div>
 
                     <div className="text-right">
