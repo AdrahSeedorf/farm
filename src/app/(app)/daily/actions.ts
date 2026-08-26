@@ -17,6 +17,8 @@ export interface DailyFormState {
   fieldErrors?: Record<string, string>;
   /** Shown for confirmation. The submission is NOT saved while these stand. */
   warnings?: Warning[];
+  /** Fingerprint of those warnings — sent back so acceptance covers only them. */
+  warningToken?: string;
 }
 
 export async function saveDailyRecord(
@@ -40,7 +42,9 @@ export async function saveDailyRecord(
 
   const result = await submitDailyRecord(principal, flockId, parsed.data);
 
-  if (result.status === 'needsConfirmation') return { warnings: result.warnings };
+  if (result.status === 'needsConfirmation') {
+    return { warnings: result.warnings, warningToken: result.token };
+  }
   if (result.status === 'error') return { error: result.message };
 
   await recordAudit({

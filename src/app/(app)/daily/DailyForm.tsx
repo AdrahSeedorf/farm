@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import { useFormStatus } from 'react-dom';
 import type { DailyFormState } from './actions';
 
@@ -17,6 +17,11 @@ interface Props {
   } | null;
   mortalityReasons: { key: string; label: string }[];
   cullReasons: { key: string; label: string }[];
+  /** Brooding questions are asked only while the flock still needs heat. */
+  isBrooding: boolean;
+  broodTargetC: number | null;
+  chickBehaviours: { key: string; label: string }[];
+  litterConditions: { key: string; label: string }[];
 }
 
 /**
@@ -56,6 +61,8 @@ function NumberField({
   unit,
   placeholder = '0',
   step,
+  value,
+  onChange,
 }: {
   id: string;
   name: string;
@@ -64,6 +71,8 @@ function NumberField({
   unit?: string;
   placeholder?: string;
   step?: string;
+  value: string;
+  onChange: (v: string) => void;
 }) {
   return (
     <div>
@@ -79,6 +88,8 @@ function NumberField({
         step={step ?? '1'}
         min="0"
         placeholder={placeholder}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
         className="mt-1.5 min-h-[60px] w-full rounded-control border border-border-strong bg-surface-card px-4 text-[22px] font-semibold tabular-nums text-text-primary outline-none focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/25"
       />
       {hint ? <p className="mt-1 text-[13px] text-text-muted">{hint}</p> : null}
@@ -94,8 +105,68 @@ export function DailyForm({
   previous,
   mortalityReasons,
   cullReasons,
+  isBrooding,
+  broodTargetC,
+  chickBehaviours,
+  litterConditions,
 }: Props) {
   const [state, formAction] = useActionState(action, {} as DailyFormState);
+
+  /**
+   * EVERY FIELD IS CONTROLLED, DELIBERATELY.
+   *
+   * React resets a form after a server action completes. With uncontrolled
+   * inputs that means the moment a warning appears, everything typed is wiped —
+   * and pressing "yes, this is correct" would then save a BLANK record over an
+   * entry someone had just carefully filled in.
+   *
+   * Holding the values in React state survives the round trip, so the warning
+   * banner appears above exactly what was typed, still there to be corrected.
+   */
+  const [values, setValues] = useState({
+    mortality: '',
+    culls: '',
+    feedKg: '',
+    waterLitres: '',
+    broodTempC: '',
+    mortalityReason: '',
+    cullReason: '',
+    chickBehaviour: '',
+    litterCondition: '',
+    observations: '',
+  });
+  const set = (key: keyof typeof values) => (v: string) =>
+    setValues((prev) => ({ ...prev, [key]: v }));
+
+  /**
+   * Re-sync the DOM after every action response.
+   *
+   * React resets the form when a server action completes. For a controlled
+   * <input> it then restores the value from state — but for a controlled
+   * <select> it does NOT: React only writes the DOM when the `value` PROP
+   * changes, and the prop did not change, so the browser's blank survives.
+   *
+   * The visible symptom is nasty and quiet: pick a cause of death, get a
+   * warning, press confirm, and the record saves with no cause at all. So after
+   * each response we put every field back to what state says it should be.
+   */
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    for (const [name, value] of Object.entries(values)) {
+      const field = form.elements.namedItem(name);
+      if (
+        (field instanceof HTMLSelectElement ||
+          field instanceof HTMLInputElement ||
+          field instanceof HTMLTextAreaElement) &&
+        field.value !== value
+      ) {
+        field.value = value;
+      }
+    }
+  }, [state, values]);
+
   const warnings = state.warnings ?? [];
   const confirming = warnings.length > 0;
 
@@ -103,7 +174,7 @@ export function DailyForm({
     previous == null || value == null ? undefined : `Yesterday: ${value}${unit}`;
 
   return (
-    <form action={formAction} className="space-y-5" noValidate>
+    <form ref={formRef} action={formAction} className="space-y-5" noValidate>
       <input type="hidden" name="onDate" value={today} />
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
 
@@ -133,7 +204,7 @@ export function DailyForm({
             Nothing has been saved yet. Correct it above, or save as entered — the farm records
             what happened, not what was expected.
           </p>
-          <input type="hidden" name="acknowledgeWarnings" value="on" />
+          <input type="hidden" name="acknowledgedToken" value={state.warningToken ?? ''} />
         </div>
       ) : null}
 
@@ -141,10 +212,12 @@ export function DailyForm({
         <NumberField
           id="mortality"
           name="mortality"
+          value={values.mortality}
+          onChange={set('mortality')}
           label="Birds died"
           hint={yesterday(previous?.mortality) ?? `Flock holds ${population.toLocaleString('en-GH')}`}
         />
-        <NumberField id="culls" name="culls" label="Birds culled" hint="Put down deliberately" />
+        <NumberField id="culls" name="culls" value={values.culls} onChange={set('culls')} label="Birds culled" hint="Put down deliberately" />
       </div>
 
       <div className="grid gap-5 sm:grid-cols-2">
@@ -155,6 +228,8 @@ export function DailyForm({
           <select
             id="mortalityReason"
             name="mortalityReason"
+            value={values.mortalityReason}
+            onChange={(event) => set('mortalityReason')(event.target.value)}
             className="mt-1.5 min-h-touch w-full rounded-control border border-border-strong bg-surface-card px-3 text-[16px] text-text-primary outline-none focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/25"
           >
             <option value="">Not specified</option>
@@ -172,6 +247,8 @@ export function DailyForm({
           <select
             id="cullReason"
             name="cullReason"
+            value={values.cullReason}
+            onChange={(event) => set('cullReason')(event.target.value)}
             className="mt-1.5 min-h-touch w-full rounded-control border border-border-strong bg-surface-card px-3 text-[16px] text-text-primary outline-none focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/25"
           >
             <option value="">Not specified</option>
@@ -188,6 +265,8 @@ export function DailyForm({
         <NumberField
           id="feedKg"
           name="feedKg"
+          value={values.feedKg}
+          onChange={set('feedKg')}
           label="Feed given"
           unit="kg"
           step="0.1"
@@ -197,6 +276,8 @@ export function DailyForm({
         <NumberField
           id="waterLitres"
           name="waterLitres"
+          value={values.waterLitres}
+          onChange={set('waterLitres')}
           label="Water used"
           unit="litres"
           step="1"
@@ -204,6 +285,77 @@ export function DailyForm({
           hint={yesterday(previous?.waterLitres, ' L')}
         />
       </div>
+
+      {isBrooding ? (
+        <fieldset className="rounded-card border border-border-default bg-surface-sunken p-4">
+          <legend className="px-1.5 text-[12px] font-semibold uppercase tracking-[0.12em] text-brand-accent">
+            Brooding
+          </legend>
+
+          <div className="mt-2 grid gap-5 sm:grid-cols-2">
+            <NumberField
+              id="broodTempC"
+              name="broodTempC"
+              value={values.broodTempC}
+              onChange={set('broodTempC')}
+              label="House temperature"
+              unit="°C"
+              step="0.1"
+              placeholder="—"
+              hint={broodTargetC !== null ? `Target today: ${broodTargetC}°C` : undefined}
+            />
+
+            <div>
+              <label
+                htmlFor="chickBehaviour"
+                className="block text-[15px] font-semibold text-text-primary"
+              >
+                What the chicks are doing
+              </label>
+              <select
+                id="chickBehaviour"
+                name="chickBehaviour"
+                value={values.chickBehaviour}
+                onChange={(event) => set('chickBehaviour')(event.target.value)}
+                className="mt-1.5 min-h-touch w-full rounded-control border border-border-strong bg-surface-card px-3 text-[16px] text-text-primary outline-none focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/25"
+              >
+                <option value="">Not recorded</option>
+                {chickBehaviours.map((b) => (
+                  <option key={b.key} value={b.key}>
+                    {b.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[13px] text-text-muted">
+                The birds are a better thermometer than the thermometer.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <label
+              htmlFor="litterCondition"
+              className="block text-[15px] font-semibold text-text-primary"
+            >
+              Litter
+            </label>
+            <select
+              id="litterCondition"
+              name="litterCondition"
+              value={values.litterCondition}
+              onChange={(event) => set('litterCondition')(event.target.value)}
+              className="mt-1.5 min-h-touch w-full rounded-control border border-border-strong bg-surface-card px-3 text-[16px] text-text-primary outline-none focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/25"
+            >
+              <option value="">Not recorded</option>
+              {litterConditions.map((l) => (
+                <option key={l.key} value={l.key}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </fieldset>
+      ) : null}
 
       <div>
         <label htmlFor="observations" className="block text-[15px] font-semibold text-text-primary">
@@ -213,6 +365,8 @@ export function DailyForm({
           id="observations"
           name="observations"
           rows={3}
+          value={values.observations}
+          onChange={(event) => set('observations')(event.target.value)}
           placeholder="Birds quiet at the far end, one drinker dripping…"
           className="mt-1.5 w-full rounded-control border border-border-strong bg-surface-card px-3 py-2.5 text-[16px] text-text-primary outline-none focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/25"
         />

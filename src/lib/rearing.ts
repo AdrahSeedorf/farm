@@ -255,3 +255,67 @@ export function assessUniformity(
   if (cvPct <= targetCvPct * 1.5) return 'watch';
   return 'poor';
 }
+
+// ---------------------------------------------------------------------------
+// WHAT THE CHICKS ARE DOING
+// ---------------------------------------------------------------------------
+
+/**
+ * Chick behaviour under the brooder.
+ *
+ * The oldest and best diagnostic in poultry keeping. A thermometer reads the air
+ * where it happens to hang; the birds read the temperature where they actually
+ * are, and they show you the answer without being asked.
+ */
+export const CHICK_BEHAVIOURS = [
+  {
+    key: 'spread_evenly',
+    label: 'Spread evenly, active',
+    meaning: 'Comfortable — this is what you want.',
+    implies: 'ok',
+  },
+  {
+    key: 'huddled',
+    label: 'Huddled under the heat',
+    meaning: 'Too cold. Chicks pile for warmth, and the ones underneath suffocate.',
+    implies: 'cold',
+  },
+  {
+    key: 'at_walls',
+    label: 'Pressed against the walls',
+    meaning: 'Too hot. They are escaping the heat source.',
+    implies: 'hot',
+  },
+  {
+    key: 'panting',
+    label: 'Panting, wings out',
+    meaning: 'Much too hot, and already losing condition.',
+    implies: 'hot',
+  },
+  {
+    key: 'one_side',
+    label: 'Crowded to one side',
+    meaning: 'A draught. Find where the air is coming in.',
+    implies: 'draught',
+  },
+] as const;
+
+export type ChickBehaviourKey = (typeof CHICK_BEHAVIOURS)[number]['key'];
+
+export function chickBehaviour(key: string | null | undefined) {
+  if (!key) return null;
+  return CHICK_BEHAVIOURS.find((b) => b.key === key) ?? null;
+}
+
+/** Litter condition. Wet litter is where coccidiosis starts. */
+export const LITTER_CONDITIONS = [
+  { key: 'dry', label: 'Dry and friable', concern: false },
+  { key: 'damp', label: 'Damp in places', concern: true },
+  { key: 'wet', label: 'Wet', concern: true },
+  { key: 'caked', label: 'Caked', concern: true },
+] as const;
+
+export function litterCondition(key: string | null | undefined) {
+  if (!key) return null;
+  return LITTER_CONDITIONS.find((l) => l.key === key) ?? null;
+}

@@ -91,8 +91,21 @@ describe('daily record validation', () => {
     });
   });
 
-  it('reads the warning acknowledgement from a checkbox value', () => {
-    expect(parse({ acknowledgeWarnings: 'on' }).success && parse({ acknowledgeWarnings: 'on' }).data?.acknowledgeWarnings).toBe(true);
-    expect(parse({}).success && parse({}).data?.acknowledgeWarnings).toBe(false);
+  describe('warning acknowledgement', () => {
+    // Deliberately a fingerprint of the warnings shown, not a boolean. A ticked
+    // checkbox survives the entry changing underneath it, which would let a
+    // brand-new problem save without ever being displayed.
+    it('carries the token through', () => {
+      const r = parse({ acknowledgedToken: 'a1b2c3d4e5f60718' });
+      expect(r.success && r.data.acknowledgedToken).toBe('a1b2c3d4e5f60718');
+    });
+
+    it('treats an absent or empty token as no acknowledgement', () => {
+      expect(parse({}).success && parse({}).data?.acknowledgedToken).toBeUndefined();
+      expect(
+        parse({ acknowledgedToken: '' }).success &&
+          parse({ acknowledgedToken: '' }).data?.acknowledgedToken,
+      ).toBeUndefined();
+    });
   });
 });

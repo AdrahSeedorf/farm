@@ -363,6 +363,25 @@ model DailyRecord {
   feedKg           Float?
   waterLitres      Float?
 
+  // --- Brooding ------------------------------------------------------------
+  // Captured only while a flock is young enough to need heat. The daily record
+  // asks for these when the flock is brooding and stops asking when it is not,
+  // rather than showing a farmhand fields that will never apply again.
+
+  /// House temperature at the birds, in °C.
+  broodTempC       Float?
+
+  /// What the chicks were doing — see CHICK_BEHAVIOURS in src/lib/rearing.ts.
+  ///
+  /// Recorded ALONGSIDE the temperature, not instead of it. Chicks are a better
+  /// instrument than a thermometer on a wall: huddled under the heat means cold,
+  /// pressed to the walls means hot, and either reading tells you more than a
+  /// number taken three metres from where the birds actually are.
+  chickBehaviour   String?
+
+  /// dry · damp · wet · caked. Wet litter is where coccidiosis starts.
+  litterCondition  String?
+
   observations     String?
 
   /// Plausibility warnings that were shown and accepted at entry time, e.g.

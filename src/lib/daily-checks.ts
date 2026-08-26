@@ -17,6 +17,8 @@
  * configured standards, set on veterinary advice — nothing here prescribes.
  */
 
+import { assessTemperature, chickBehaviour, litterCondition, type BroodingCurve } from '@/lib/rearing';
+
 export interface Warning {
   field: string;
   message: string;
@@ -29,6 +31,11 @@ export interface DailyCheckInput {
   culls: number;
   feedKg?: number | null;
   waterLitres?: number | null;
+  /** Brooding only. Absent once the flock no longer needs heat. */
+  broodTempC?: number | null;
+  chickBehaviour?: string | null;
+  litterCondition?: string | null;
+  broodingCurve?: BroodingCurve;
   /** Yesterday's figures, when there are any, for step-change detection. */
   previous?: {
     mortality?: number | null;
@@ -144,6 +151,59 @@ export function checkDailyRecord(
         message: `Water is down ${Math.abs(Math.round(change))}% on yesterday. This is often the first sign of a problem.`,
       });
     }
+  }
+
+  // --- Brooding -----------------------------------------------------------
+  if (input.broodTempC != null) {
+    const { target, verdict } = assessTemperature(
+      input.broodTempC,
+      input.ageDays,
+      input.broodingCurve,
+    );
+    if (verdict === 'cold') {
+      warnings.push({
+        field: 'broodTempC',
+        message: `${input.broodTempC}°C is below the ${target}°C target for day ${input.ageDays}. Cold chicks pile, and the ones underneath suffocate.`,
+      });
+    } else if (verdict === 'hot') {
+      warnings.push({
+        field: 'broodTempC',
+        message: `${input.broodTempC}°C is above the ${target}°C target for day ${input.ageDays}.`,
+      });
+    }
+  }
+
+  const behaviour = chickBehaviour(input.chickBehaviour);
+  if (behaviour && behaviour.implies !== 'ok') {
+    warnings.push({ field: 'chickBehaviour', message: behaviour.meaning });
+  }
+
+  // THE BIRDS AND THE THERMOMETER DISAGREEING IS ITSELF THE FINDING.
+  //
+  // A wall thermometer reads the air where it hangs. The chicks read the
+  // temperature where they actually are. When the two disagree, it is almost
+  // always the thermometer that is in the wrong place — and that is worth
+  // saying out loud, because otherwise the number gets believed.
+  if (behaviour && input.broodTempC != null) {
+    const { verdict, target } = assessTemperature(
+      input.broodTempC,
+      input.ageDays,
+      input.broodingCurve,
+    );
+    if (verdict === 'ok' && (behaviour.implies === 'cold' || behaviour.implies === 'hot')) {
+      warnings.push({
+        field: 'chickBehaviour',
+        message: `The thermometer reads ${input.broodTempC}°C, close to the ${target}°C target, but the chicks are telling you otherwise. Trust the birds — check where the thermometer is hanging.`,
+      });
+    }
+  }
+
+  const litter = litterCondition(input.litterCondition);
+  if (litter?.concern) {
+    warnings.push({
+      field: 'litterCondition',
+      message: `Litter recorded as ${litter.label.toLowerCase()}. Wet litter is where coccidiosis starts — worth attention before it spreads.`,
+    });
   }
 
   return warnings;

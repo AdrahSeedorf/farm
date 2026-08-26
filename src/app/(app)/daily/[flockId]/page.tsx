@@ -7,6 +7,7 @@ import { Forbidden } from '@/components/ui/Forbidden';
 import { canAccessSite } from '@/lib/scope';
 import { dailyContextFor } from '@/lib/daily-service';
 import { reasonCodesFor, reasonLabel } from '@/lib/reason-codes';
+import { CHICK_BEHAVIOURS, LITTER_CONDITIONS, chickBehaviour, litterCondition } from '@/lib/rearing';
 import { DailyForm } from '../DailyForm';
 import { saveDailyRecord } from '../actions';
 
@@ -50,6 +51,15 @@ export default async function DailyEntryPage({
             { label: 'Culled', value: e.culls },
             { label: 'Feed', value: e.feedKg == null ? '—' : `${e.feedKg} kg` },
             { label: 'Water', value: e.waterLitres == null ? '—' : `${e.waterLitres} L` },
+            ...(e.broodTempC != null
+              ? [{ label: 'House temp', value: `${e.broodTempC}°C` }]
+              : []),
+            ...(e.chickBehaviour
+              ? [{ label: 'Chicks', value: chickBehaviour(e.chickBehaviour)?.label ?? '—' }]
+              : []),
+            ...(e.litterCondition
+              ? [{ label: 'Litter', value: litterCondition(e.litterCondition)?.label ?? '—' }]
+              : []),
           ].map((row) => (
             <div key={row.label} className="bg-surface-card p-4">
               <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-muted">
@@ -142,6 +152,10 @@ export default async function DailyEntryPage({
             key: r.key,
             label: reasonLabel(r.key),
           }))}
+          isBrooding={context.isBrooding}
+          broodTargetC={context.broodTargetC}
+          chickBehaviours={CHICK_BEHAVIOURS.map((b) => ({ key: b.key, label: b.label }))}
+          litterConditions={LITTER_CONDITIONS.map((l) => ({ key: l.key, label: l.label }))}
         />
       </div>
 

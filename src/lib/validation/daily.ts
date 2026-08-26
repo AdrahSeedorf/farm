@@ -64,6 +64,18 @@ export const dailyRecordSchema = z.object({
   culls: count,
   feedKg: measure,
   waterLitres: measure,
+  /** Brooding only — ignored once the flock no longer needs heat. */
+  broodTempC: measure,
+  chickBehaviour: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v === '' ? undefined : v)),
+  litterCondition: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v === '' ? undefined : v)),
   observations: z
     .string()
     .trim()
@@ -89,11 +101,17 @@ export const dailyRecordSchema = z.object({
    * constraint rejects the second attempt outright rather than merging it.
    */
   idempotencyKey: z.string().trim().min(8).max(64),
-  /** Set when the person has seen the warnings and chosen to continue. */
-  acknowledgeWarnings: z
-    .union([z.literal('on'), z.literal('true'), z.literal('')])
+  /**
+   * Fingerprint of the warnings the person actually saw and accepted.
+   *
+   * Not a boolean: a checkbox stays ticked while the entry changes underneath
+   * it, which would let a brand-new problem save without ever being shown.
+   */
+  acknowledgedToken: z
+    .string()
+    .trim()
     .optional()
-    .transform((v) => v === 'on' || v === 'true'),
+    .transform((v) => (v === '' ? undefined : v)),
 });
 
 export type DailyRecordInput = z.infer<typeof dailyRecordSchema>;

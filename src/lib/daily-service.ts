@@ -1,7 +1,9 @@
 import 'server-only';
+import { createHash } from 'node:crypto';
 import { db } from '@/lib/db';
 import { recordEventWithin, FlockError } from '@/lib/flock-service';
 import { checkDailyRecord, thresholdsFrom, type Warning } from '@/lib/daily-checks';
+import { broodingCurveFrom, isBroodingAge, broodingTargetC } from '@/lib/rearing';
 import { ageInDays } from '@/lib/metrics';
 import type { Principal } from '@/lib/rbac';
 import type { DailyRecordInput } from '@/lib/validation/daily';
@@ -40,6 +42,9 @@ export interface DailyContext {
     culls: number;
     feedKg: number | null;
     waterLitres: number | null;
+    broodTempC: number | null;
+    chickBehaviour: string | null;
+    litterCondition: string | null;
     observations: string | null;
     recordedBy: string;
     verifiedBy: string | null;
@@ -53,6 +58,10 @@ export interface DailyContext {
     waterLitres: number | null;
   } | null;
   thresholds: ReturnType<typeof thresholdsFrom>;
+  broodingCurve: ReturnType<typeof broodingCurveFrom>;
+  /** Whether this flock still needs the brooding questions asked. */
+  isBrooding: boolean;
+  broodTargetC: number | null;
 }
 
 /** Everything the entry screen needs for one flock, in a handful of queries. */
@@ -104,6 +113,10 @@ export async function dailyContextFor(
   const existingCounts = existingRecord ? await eventsFor(existingRecord.id) : null;
   const previousCounts = previousRecord ? await eventsFor(previousRecord.id) : null;
 
+  const curve = broodingCurveFrom(flock.productionType.standards);
+  const age = ageInDays(flock.dateOfHatch, onDate);
+  const brooding = isBroodingAge(age, curve);
+
   return {
     flockId: flock.id,
     code: flock.code,
@@ -120,6 +133,9 @@ export async function dailyContextFor(
             culls: existingCounts.culls,
             feedKg: existingRecord.feedKg,
             waterLitres: existingRecord.waterLitres,
+            broodTempC: existingRecord.broodTempC,
+            chickBehaviour: existingRecord.chickBehaviour,
+            litterCondition: existingRecord.litterCondition,
             observations: existingRecord.observations,
             recordedBy: existingRecord.recordedBy.name,
             verifiedBy: existingRecord.verifiedBy?.name ?? null,
@@ -138,13 +154,37 @@ export async function dailyContextFor(
           }
         : null,
     thresholds: thresholdsFrom(flock.productionType.standards),
+    broodingCurve: curve,
+    isBrooding: brooding,
+    broodTargetC: brooding ? broodingTargetC(age, curve) : null,
   };
 }
 
 export type SubmitResult =
   | { status: 'saved'; recordId: string }
-  | { status: 'needsConfirmation'; warnings: Warning[] }
+  | { status: 'needsConfirmation'; warnings: Warning[]; token: string }
   | { status: 'error'; message: string };
+
+/**
+ * A fingerprint of exactly which warnings were shown.
+ *
+ * WHY A TOKEN AND NOT A BOOLEAN.
+ *   A plain "I have seen the warnings" checkbox stays ticked. Correct the
+ *   mortality figure, mistype the feed instead, and the form submits with the
+ *   old acknowledgement still attached — saving a brand-new problem that was
+ *   never displayed to anyone.
+ *
+ *   Tying the acknowledgement to the CONTENT means it only covers the warnings
+ *   the person actually read. Change the entry, and any new warning has to be
+ *   shown and accepted on its own terms.
+ */
+function warningToken(warnings: Warning[]): string {
+  const canonical = warnings
+    .map((w) => `${w.field}:${w.message}`)
+    .sort()
+    .join('|');
+  return createHash('sha1').update(canonical).digest('hex').slice(0, 16);
+}
 
 /**
  * Submit one morning's record.
@@ -177,13 +217,22 @@ export async function submitDailyRecord(
       culls: input.culls,
       feedKg: input.feedKg,
       waterLitres: input.waterLitres,
+      // Brooding answers are only meaningful while the flock is brooding.
+      broodTempC: context.isBrooding ? input.broodTempC : null,
+      chickBehaviour: context.isBrooding ? (input.chickBehaviour ?? null) : null,
+      litterCondition: context.isBrooding ? (input.litterCondition ?? null) : null,
+      broodingCurve: context.broodingCurve,
       previous: context.previous,
     },
     context.thresholds,
   );
 
-  if (warnings.length > 0 && !input.acknowledgeWarnings) {
-    return { status: 'needsConfirmation', warnings };
+  if (warnings.length > 0) {
+    const token = warningToken(warnings);
+    // Only an acknowledgement of THESE warnings counts.
+    if (input.acknowledgedToken !== token) {
+      return { status: 'needsConfirmation', warnings, token };
+    }
   }
 
   try {
@@ -201,6 +250,9 @@ export async function submitDailyRecord(
           idempotencyKey: input.idempotencyKey,
           feedKg: input.feedKg,
           waterLitres: input.waterLitres,
+          broodTempC: context.isBrooding ? input.broodTempC : null,
+          chickBehaviour: context.isBrooding ? (input.chickBehaviour ?? null) : null,
+          litterCondition: context.isBrooding ? (input.litterCondition ?? null) : null,
           observations: input.observations ?? null,
           warnings: warnings.length > 0 ? JSON.parse(JSON.stringify(warnings)) : undefined,
           recordedById: principal.userId,
