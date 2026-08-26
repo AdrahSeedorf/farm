@@ -8,6 +8,8 @@ import { recordAudit } from '@/lib/audit';
 import { canAccessSite, orgFilter } from '@/lib/scope';
 import { AuthorizationError } from '@/lib/rbac';
 import { recordAnimalGroupEvent, FlockError } from '@/lib/flock-service';
+import { ageInDays } from '@/lib/metrics';
+import { weightSampleSchema, parseWeights } from '@/lib/validation/weight';
 import { fromCedis } from '@/lib/money';
 import { isValidReason } from '@/lib/reason-codes';
 import {
@@ -270,6 +272,76 @@ export async function changeStage(
     after: { flock: flock.code, stage: stage.name },
   });
 
+  revalidatePath(`/flocks/${flockId}`);
+  return {};
+}
+
+/**
+ * Record a weight sample.
+ *
+ * The single best predictor of how a laying cycle will go. A flock that comes
+ * into lay ragged peaks lower and holds peak for less time, and nothing done in
+ * the laying house afterwards fixes it — which is why this is measured weekly
+ * through rearing rather than once at the end.
+ */
+export async function recordWeightSample(
+  flockId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const principal = await requirePermission('production:create');
+
+  const flock = await db.animalGroup.findFirst({
+    where: { id: flockId, site: { ...orgFilter(principal) } },
+    select: { id: true, siteId: true, code: true, dateOfHatch: true },
+  });
+  if (!flock) return { error: 'That flock no longer exists.' };
+  if (!canAccessSite(principal, flock.siteId)) {
+    throw new AuthorizationError('production:create', flock.siteId);
+  }
+
+  const parsed = weightSampleSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+  const input = parsed.data;
+
+  const { weights, rejected } = parseWeights(input.weights);
+  if (rejected.length > 0) {
+    return {
+      fieldErrors: {
+        weights: `Could not read ${rejected.slice(0, 3).map((r) => `"${r}"`).join(', ')}${rejected.length > 3 ? ` and ${rejected.length - 3} more` : ''}. Weights are in grams.`,
+      },
+    };
+  }
+
+  const sample = await db.weightSample.create({
+    data: {
+      animalGroupId: flockId,
+      takenOn: input.takenOn,
+      ageDays: ageInDays(flock.dateOfHatch, input.takenOn),
+      // Individual weights when we have them; otherwise the tallied average.
+      sampleSize: weights.length > 0 ? weights.length : (input.sampleSize ?? 0),
+      weightsGrams: weights,
+      averageGrams:
+        weights.length > 0 ? null : input.averageGrams === null ? null : Math.round(input.averageGrams),
+      notes: input.notes ?? null,
+      recordedById: principal.userId,
+    },
+    select: { id: true },
+  });
+
+  await recordAudit({
+    principal,
+    action: 'record.correct',
+    entityType: 'WeightSample',
+    entityId: sample.id,
+    after: {
+      flock: flock.code,
+      takenOn: input.takenOn.toISOString().slice(0, 10),
+      birdsWeighed: weights.length > 0 ? weights.length : input.sampleSize,
+    },
+  });
+
+  revalidatePath(`/flocks/${flockId}/weights`);
   revalidatePath(`/flocks/${flockId}`);
   return {};
 }

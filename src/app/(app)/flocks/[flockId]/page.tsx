@@ -112,6 +112,12 @@ export default async function FlockPage({
               .join(' · ')}
           </p>
         </div>
+        <Link
+          href={`/flocks/${flock.id}/weights`}
+          className="inline-flex min-h-touch items-center rounded-control border border-border-strong bg-surface-card px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
+        >
+          Weights &amp; uniformity
+        </Link>
       </div>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
