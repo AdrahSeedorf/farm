@@ -2,12 +2,14 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { randomUUID } from 'node:crypto';
-import { pageGuard } from '@/lib/session';
+import { pageGuard, currentUserCan } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
 import { canAccessSite } from '@/lib/scope';
 import { dailyContextFor } from '@/lib/daily-service';
 import { reasonCodesFor, reasonLabel } from '@/lib/reason-codes';
 import { CHICK_BEHAVIOURS, LITTER_CONDITIONS, chickBehaviour, litterCondition } from '@/lib/rearing';
+import { uncostedNote } from '@/lib/feed-issue';
+import { formatGHS, pesewas } from '@/lib/money';
 import { DailyForm } from '../DailyForm';
 import { saveDailyRecord } from '../actions';
 
@@ -30,6 +32,15 @@ export default async function DailyEntryPage({
   if (!canAccessSite(principal, context.siteId)) notFound();
 
   const heading = context.houseName ?? context.code;
+
+  /**
+   * A farm worker records the feed but must never see what it cost.
+   *
+   * The role matrix already withholds every financial resource from them; this
+   * is the same rule applied at the point of display, because a cost that leaks
+   * onto the one screen a worker uses every morning makes the matrix decorative.
+   */
+  const canSeeCost = await currentUserCan('finance:view');
 
   // Already done today — show what was recorded, read-only.
   if (context.existing) {
@@ -69,6 +80,28 @@ export default async function DailyEntryPage({
             </div>
           ))}
         </dl>
+
+        {e.feedIssue ? (
+          <div className="mt-5 rounded-card border border-border-default bg-surface-card p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-muted">
+              Taken from the store
+            </p>
+            <p className="mt-1.5 text-[15px] text-text-primary">
+              {e.feedIssue.issuedKg} kg of {e.feedIssue.itemName}
+              {e.feedIssue.batchNumbers.length > 0
+                ? ` · batch ${[...new Set(e.feedIssue.batchNumbers)].join(', ')}`
+                : ''}
+              {canSeeCost && e.feedIssue.costPesewas !== null
+                ? ` · ${formatGHS(pesewas(e.feedIssue.costPesewas))}`
+                : ''}
+            </p>
+            {e.feedIssue.uncostedKg > 0 ? (
+              <p className="mt-1.5 text-[13px] text-status-attention">
+                {uncostedNote(e.feedIssue.uncostedKg, e.feedIssue.itemName)}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         {e.observations ? (
           <p className="mt-5 rounded-card border border-border-default bg-surface-card p-4 text-[15px] text-text-secondary">
@@ -156,6 +189,7 @@ export default async function DailyEntryPage({
           broodTargetC={context.broodTargetC}
           chickBehaviours={CHICK_BEHAVIOURS.map((b) => ({ key: b.key, label: b.label }))}
           litterConditions={LITTER_CONDITIONS.map((l) => ({ key: l.key, label: l.label }))}
+          feedSources={context.feedSources}
         />
       </div>
 

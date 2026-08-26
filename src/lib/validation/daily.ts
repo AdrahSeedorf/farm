@@ -107,6 +107,21 @@ export const dailyRecordSchema = z.object({
    * Not a boolean: a checkbox stays ticked while the entry changes underneath
    * it, which would let a brand-new problem save without ever being shown.
    */
+  /**
+   * Where the feed came from. Both optional: a farm that has not set up its
+   * store yet must still be able to record that 50 kg was fed, and the daily
+   * record is not the place to start refusing entries over inventory setup.
+   */
+  feedItemId: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v === '' || v === undefined ? null : v)),
+  feedStockLocationId: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v === '' || v === undefined ? null : v)),
   acknowledgedToken: z
     .string()
     .trim()

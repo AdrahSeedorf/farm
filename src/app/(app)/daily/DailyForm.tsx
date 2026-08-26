@@ -22,6 +22,16 @@ interface Props {
   broodTargetC: number | null;
   chickBehaviours: { key: string; label: string }[];
   litterConditions: { key: string; label: string }[];
+  /**
+   * Where feed comes off the store. Empty when the farm has no stock set up —
+   * the feed field then behaves exactly as it always has.
+   */
+  feedSources: {
+    items: { id: string; name: string; onHandKg: number }[];
+    locations: { id: string; name: string }[];
+    defaultItemId: string | null;
+    defaultLocationId: string | null;
+  };
 }
 
 /**
@@ -109,6 +119,7 @@ export function DailyForm({
   broodTargetC,
   chickBehaviours,
   litterConditions,
+  feedSources,
 }: Props) {
   const [state, formAction] = useActionState(action, {} as DailyFormState);
 
@@ -134,6 +145,8 @@ export function DailyForm({
     chickBehaviour: '',
     litterCondition: '',
     observations: '',
+    feedItemId: feedSources.defaultItemId ?? '',
+    feedStockLocationId: feedSources.defaultLocationId ?? '',
   });
   const set = (key: keyof typeof values) => (v: string) =>
     setValues((prev) => ({ ...prev, [key]: v }));
@@ -286,6 +299,68 @@ export function DailyForm({
         />
       </div>
 
+      {/*
+        Shown only once a feed figure has been typed, and only when the farm
+        actually holds stock. Asking which bag it came from before anyone has
+        said any feed was given is a question about nothing.
+      */}
+      {feedSources.items.length > 0 && Number(values.feedKg) > 0 ? (
+        <fieldset className="rounded-card border border-border-default bg-surface-sunken p-4">
+          <legend className="px-1.5 text-[12px] font-semibold uppercase tracking-[0.12em] text-brand-accent">
+            Taken from
+          </legend>
+          <div className="mt-2 grid gap-4 sm:grid-cols-2">
+            <div>
+              <label
+                htmlFor="feedItemId"
+                className="block text-[15px] font-semibold text-text-primary"
+              >
+                Which feed
+              </label>
+              <select
+                id="feedItemId"
+                name="feedItemId"
+                value={values.feedItemId}
+                onChange={(e) => set('feedItemId')(e.target.value)}
+                className="mt-1.5 min-h-[56px] w-full rounded-control border border-border-strong bg-surface-card px-3 text-[16px] text-text-primary"
+              >
+                <option value="">Not from the store</option>
+                {feedSources.items.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.name} — {formatKg(i.onHandKg)} kg left
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label
+                htmlFor="feedStockLocationId"
+                className="block text-[15px] font-semibold text-text-primary"
+              >
+                From which store
+              </label>
+              <select
+                id="feedStockLocationId"
+                name="feedStockLocationId"
+                value={values.feedStockLocationId}
+                onChange={(e) => set('feedStockLocationId')(e.target.value)}
+                className="mt-1.5 min-h-[56px] w-full rounded-control border border-border-strong bg-surface-card px-3 text-[16px] text-text-primary"
+              >
+                {feedSources.locations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <p className="mt-2.5 text-[13px] text-text-muted">
+            This takes the feed off the store and charges it to the flock. Choose &ldquo;not
+            from the store&rdquo; if it came from somewhere else.
+          </p>
+        </fieldset>
+      ) : null}
+
       {isBrooding ? (
         <fieldset className="rounded-card border border-border-default bg-surface-sunken p-4">
           <legend className="px-1.5 text-[12px] font-semibold uppercase tracking-[0.12em] text-brand-accent">
@@ -375,4 +450,8 @@ export function DailyForm({
       <Submit confirming={confirming} />
     </form>
   );
+}
+
+function formatKg(value: number): string {
+  return new Intl.NumberFormat('en-GH', { maximumFractionDigits: 1 }).format(value);
 }

@@ -3,9 +3,15 @@ import type { Prisma } from '@/generated/prisma/client';
 import { db } from '@/lib/db';
 import type { Principal } from '@/lib/rbac';
 import { canAccessSite } from '@/lib/scope';
-import { stockDeltaFor, type StockMovementType } from '@/lib/stock-ledger';
+import {
+  selectBatchesFEFO,
+  stockDeltaFor,
+  type BatchStock,
+  type StockMovementType,
+} from '@/lib/stock-ledger';
 import { BASE_UNIT, convert, getUnit } from '@/lib/uom';
 import { blendBatchCost, decideBatch, unitCostPerBase } from '@/lib/receiving';
+import { costOfAllocations } from '@/lib/feed-issue';
 
 /**
  * Stock movement service — ADRAH Farms
@@ -224,6 +230,131 @@ export async function recordMovementWithin(
     batchNumber,
     unitCostPesewas,
   };
+}
+
+// ---------------------------------------------------------------------------
+// FEED ISSUES
+// ---------------------------------------------------------------------------
+
+export interface IssueFeedInput {
+  itemId: string;
+  stockLocationId: string;
+  animalGroupId: string;
+  /** Kilograms, as recorded on the daily sheet. */
+  quantityKg: number;
+  occurredOn: Date;
+  /** The daily record this issue belongs to, so the two can be traced together. */
+  dailyRecordId: string;
+  flockCode: string;
+}
+
+export interface IssuedFeed {
+  issuedBase: number;
+  shortfallBase: number;
+  costPesewas: number;
+  uncostedBase: number;
+  batchNumbers: string[];
+  movementIds: string[];
+}
+
+/**
+ * Issue feed to a flock, first-expiry-first-out, and charge it to the flock.
+ *
+ * ONE MOVEMENT PER BATCH. A single 50 kg issue that spans two deliveries is two
+ * rows, because a movement carries one batch and one batch carries one price.
+ * Collapsing them into a single row at a blended price would throw away the only
+ * thing that makes the flock's feed cost reconcilable against invoices.
+ *
+ * SHORTFALL IS NOT AN ERROR HERE. `selectBatchesFEFO` reports what it could not
+ * cover, and this function issues what exists rather than throwing — the caller
+ * has already shown the storekeeper a warning saying so. Throwing would take the
+ * morning's mortality down with it.
+ */
+export async function issueFeedWithin(
+  tx: Prisma.TransactionClient,
+  principal: Principal,
+  input: IssueFeedInput,
+): Promise<IssuedFeed> {
+  const batches = await batchStockAt(tx, input.itemId, input.stockLocationId);
+  const { allocations, shortfall } = selectBatchesFEFO(batches, input.quantityKg);
+
+  const costByBatchId = new Map(batches.map((b) => [b.id, b.unitCostPesewas ?? null]));
+  const { pesewas, uncostedBase } = costOfAllocations(allocations, costByBatchId);
+
+  const movementIds: string[] = [];
+  for (const allocation of allocations) {
+    const movement = await recordMovementWithin(tx, principal, {
+      itemId: input.itemId,
+      stockLocationId: input.stockLocationId,
+      type: 'ISSUE',
+      quantityEntered: allocation.quantity,
+      enteredUomKey: 'kg',
+      occurredOn: input.occurredOn,
+      itemBatchId: allocation.batchId,
+      notes: `Fed to ${input.flockCode}`,
+      sourceType: 'dailyRecord',
+      sourceId: input.dailyRecordId,
+    });
+    movementIds.push(movement.id);
+  }
+
+  // The cost entry is what makes a flock's feed bill add up. Omitted entirely
+  // when nothing costed, rather than written as a zero that would read as
+  // "this feed was free".
+  if (pesewas > 0) {
+    await tx.flockCostEntry.create({
+      data: {
+        animalGroupId: input.animalGroupId,
+        category: 'FEED',
+        amountPesewas: pesewas,
+        incurredOn: input.occurredOn,
+        description: `Feed issued: ${round(input.quantityKg - shortfall)} kg`,
+        sourceType: 'dailyRecord',
+        sourceId: input.dailyRecordId,
+        recordedById: principal.userId,
+      },
+    });
+  }
+
+  return {
+    issuedBase: round(input.quantityKg - shortfall),
+    shortfallBase: shortfall,
+    costPesewas: pesewas,
+    uncostedBase,
+    batchNumbers: allocations.map((a) => a.batchNumber),
+    movementIds,
+  };
+}
+
+/**
+ * Batches of one item with what is left AT ONE LOCATION.
+ *
+ * Location-scoped on purpose. A farm with feed in the main store and vaccines in
+ * a fridge must not be able to issue from a building the storekeeper is not
+ * standing in.
+ */
+export async function batchStockAt(
+  tx: Prisma.TransactionClient,
+  itemId: string,
+  stockLocationId: string,
+): Promise<BatchStock[]> {
+  const [batches, sums] = await Promise.all([
+    tx.itemBatch.findMany({ where: { itemId } }),
+    tx.stockMovement.groupBy({
+      by: ['itemBatchId'],
+      where: { itemId, stockLocationId, itemBatchId: { not: null } },
+      _sum: { deltaBase: true },
+    }),
+  ]);
+
+  const onHand = new Map(sums.map((s) => [s.itemBatchId, s._sum.deltaBase ?? 0]));
+  return batches.map((b) => ({
+    id: b.id,
+    batchNumber: b.batchNumber,
+    expiresOn: b.expiresOn,
+    onHand: onHand.get(b.id) ?? 0,
+    unitCostPesewas: b.unitCostPesewas,
+  }));
 }
 
 async function uomIdFor(tx: Prisma.TransactionClient, key: string): Promise<string> {

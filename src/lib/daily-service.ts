@@ -1,6 +1,8 @@
 import 'server-only';
 import { db } from '@/lib/db';
 import { recordEventWithin, FlockError } from '@/lib/flock-service';
+import { issueFeedWithin } from '@/lib/stock-movements';
+import { checkFeedIssue } from '@/lib/feed-issue';
 import { checkDailyRecord, thresholdsFrom } from '@/lib/daily-checks';
 import { warningToken, type Warning } from '@/lib/warnings';
 import { broodingCurveFrom, isBroodingAge, broodingTargetC } from '@/lib/rearing';
@@ -49,6 +51,15 @@ export interface DailyContext {
     recordedBy: string;
     verifiedBy: string | null;
     warnings: Warning[];
+    /** What actually left the store for this record, if anything did. */
+    feedIssue: {
+      itemName: string;
+      issuedKg: number;
+      batchNumbers: string[];
+      costPesewas: number | null;
+      /** Drawn from batches with no recorded price — the cost is short by this. */
+      uncostedKg: number;
+    } | null;
   } | null;
   /** Yesterday's figures, shown as faint hints so anomalies stand out. */
   previous: {
@@ -62,6 +73,105 @@ export interface DailyContext {
   /** Whether this flock still needs the brooding questions asked. */
   isBrooding: boolean;
   broodTargetC: number | null;
+  /**
+   * Where feed can be drawn from for this flock.
+   *
+   * Empty when the farm has not set up any stock — and the daily record then
+   * behaves exactly as it did before, recording the kilograms and nothing more.
+   * Setting up inventory is not a precondition for recording a morning.
+   */
+  feedSources: {
+    items: { id: string; name: string; onHandKg: number }[];
+    locations: { id: string; name: string }[];
+    /** What this flock was fed last, so tomorrow needs no decision at all. */
+    defaultItemId: string | null;
+    defaultLocationId: string | null;
+  };
+}
+
+/**
+ * Feed items and stores available to one flock's site, with what is on hand.
+ *
+ * Restricted to MASS items because the daily record's feed figure is in
+ * kilograms. Offering an item counted in pieces would let someone record "40 kg"
+ * of egg crates, and the ledger would dutifully store it.
+ */
+async function feedSourcesFor(
+  organisationId: string,
+  siteId: string,
+  flockId: string,
+): Promise<DailyContext['feedSources']> {
+  const [locations, items] = await Promise.all([
+    db.stockLocation.findMany({
+      where: { siteId, isActive: true, site: { organisationId } },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    }),
+    db.item.findMany({
+      where: { organisationId, isActive: true, stockUom: { dimension: 'MASS' } },
+      orderBy: [{ category: 'asc' }, { name: 'asc' }],
+      select: { id: true, name: true, category: true },
+    }),
+  ]);
+
+  if (locations.length === 0 || items.length === 0) {
+    return { items: [], locations: [], defaultItemId: null, defaultLocationId: null };
+  }
+
+  const locationIds = locations.map((l) => l.id);
+
+  // What this flock was fed last. REMEMBERING BEATS CONFIGURING: after the first
+  // morning the pickers are already right, and the day the flock moves from
+  // chick mash to grower it is changed once and then stays changed. The
+  // alternative — a feed programme configured per lifecycle stage — is a screen
+  // nobody fills in, and a default that is silently wrong.
+  const recentRecordIds = (
+    await db.dailyRecord.findMany({
+      where: { animalGroupId: flockId },
+      orderBy: { onDate: 'desc' },
+      take: 30,
+      select: { id: true },
+    })
+  ).map((r) => r.id);
+
+  const [sums, lastIssue] = await Promise.all([
+    db.stockMovement.groupBy({
+      by: ['itemId'],
+      where: { itemId: { in: items.map((i) => i.id) }, stockLocationId: { in: locationIds } },
+      _sum: { deltaBase: true },
+    }),
+    recentRecordIds.length === 0
+      ? null
+      : db.stockMovement.findFirst({
+          where: {
+            type: 'ISSUE',
+            sourceType: 'dailyRecord',
+            sourceId: { in: recentRecordIds },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { itemId: true, stockLocationId: true },
+        }),
+  ]);
+
+  const onHand = new Map(sums.map((s) => [s.itemId, s._sum.deltaBase ?? 0]));
+
+  // Feed first, then anything else weighed — a farm that records molasses or
+  // grit through this field should find it, just not before the layer mash.
+  const ordered = [...items].sort((a, b) => {
+    const rank = (c: string) => (c === 'FEED' ? 0 : 1);
+    return rank(a.category) - rank(b.category) || a.name.localeCompare(b.name);
+  });
+
+  return {
+    items: ordered.map((i) => ({
+      id: i.id,
+      name: i.name,
+      onHandKg: onHand.get(i.id) ?? 0,
+    })),
+    locations,
+    defaultItemId: lastIssue?.itemId ?? ordered.find((i) => (onHand.get(i.id) ?? 0) > 0)?.id ?? null,
+    defaultLocationId: lastIssue?.stockLocationId ?? locations[0]?.id ?? null,
+  };
 }
 
 /** Everything the entry screen needs for one flock, in a handful of queries. */
@@ -75,6 +185,7 @@ export async function dailyContextFor(
       productionUnit: { select: { name: true } },
       currentStage: { select: { name: true } },
       productionType: { select: { standards: true } },
+      site: { select: { organisationId: true } },
     },
   });
   if (!flock) return null;
@@ -113,6 +224,11 @@ export async function dailyContextFor(
   const existingCounts = existingRecord ? await eventsFor(existingRecord.id) : null;
   const previousCounts = previousRecord ? await eventsFor(previousRecord.id) : null;
 
+  const [feedSources, existingIssue] = await Promise.all([
+    feedSourcesFor(flock.site.organisationId, flock.siteId, flockId),
+    existingRecord ? feedIssueFor(existingRecord.id) : null,
+  ]);
+
   const curve = broodingCurveFrom(flock.productionType.standards);
   const age = ageInDays(flock.dateOfHatch, onDate);
   const brooding = isBroodingAge(age, curve);
@@ -142,6 +258,7 @@ export async function dailyContextFor(
             warnings: Array.isArray(existingRecord.warnings)
               ? (existingRecord.warnings as unknown as Warning[])
               : [],
+            feedIssue: existingIssue,
           }
         : null,
     previous:
@@ -157,6 +274,49 @@ export async function dailyContextFor(
     broodingCurve: curve,
     isBrooding: brooding,
     broodTargetC: brooding ? broodingTargetC(age, curve) : null,
+    feedSources,
+  };
+}
+
+/**
+ * What left the store for one daily record.
+ *
+ * Read back off the ledger rather than stored on the record, for the same reason
+ * mortality is: the movements are the truth, and a second copy on the record
+ * would be one more thing that can disagree with them.
+ */
+async function feedIssueFor(
+  recordId: string,
+): Promise<NonNullable<DailyContext['existing']>['feedIssue']> {
+  const [movements, cost] = await Promise.all([
+    db.stockMovement.findMany({
+      where: { sourceType: 'dailyRecord', sourceId: recordId, type: 'ISSUE' },
+      include: {
+        item: { select: { name: true } },
+        itemBatch: { select: { batchNumber: true, unitCostPesewas: true } },
+      },
+    }),
+    db.flockCostEntry.aggregate({
+      where: { sourceType: 'dailyRecord', sourceId: recordId, category: 'FEED' },
+      _sum: { amountPesewas: true },
+    }),
+  ]);
+
+  if (movements.length === 0) return null;
+
+  return {
+    itemName: movements[0].item.name,
+    issuedKg: Math.round(movements.reduce((sum, m) => sum - m.deltaBase, 0) * 1000) / 1000,
+    batchNumbers: movements
+      .map((m) => m.itemBatch?.batchNumber)
+      .filter((b): b is string => Boolean(b)),
+    costPesewas: cost._sum.amountPesewas,
+    uncostedKg:
+      Math.round(
+        movements
+          .filter((m) => m.itemBatch?.unitCostPesewas === null || m.itemBatch === null)
+          .reduce((sum, m) => sum - m.deltaBase, 0) * 1000,
+      ) / 1000,
   };
 }
 
@@ -181,6 +341,60 @@ export type SubmitResult =
 // `warningToken` is implemented in `warnings.ts` so the receipt form and the
 // daily record cannot drift into two different fingerprints of the same idea.
 // A drifted fingerprint fails OPEN: it accepts warnings nobody was shown.
+
+/**
+ * Work out whether this morning's feed can come off the store, and what to warn.
+ *
+ * Returns no issue at all when the farm has not chosen a source — the daily
+ * record then works exactly as it did before inventory existed. That is
+ * deliberate: setting up a store is a good idea, and it is not a precondition
+ * for writing down that six birds died.
+ */
+async function planFeedIssue(
+  input: DailyRecordInput,
+  context: DailyContext,
+): Promise<{
+  warnings: Warning[];
+  issue: { itemId: string; stockLocationId: string; quantityKg: number } | null;
+}> {
+  if (!input.feedKg || input.feedKg <= 0) return { warnings: [], issue: null };
+  if (!input.feedItemId || !input.feedStockLocationId) return { warnings: [], issue: null };
+
+  const item = context.feedSources.items.find((i) => i.id === input.feedItemId);
+  const location = context.feedSources.locations.find((l) => l.id === input.feedStockLocationId);
+  if (!item || !location) {
+    return {
+      warnings: [
+        {
+          field: 'feedKg',
+          message:
+            'That feed item or store is no longer available, so the feed was recorded ' +
+            'without taking it off the store.',
+        },
+      ],
+      issue: null,
+    };
+  }
+
+  const available = await db.stockMovement.aggregate({
+    where: { itemId: item.id, stockLocationId: location.id },
+    _sum: { deltaBase: true },
+  });
+
+  return {
+    warnings: checkFeedIssue({
+      requestedBase: input.feedKg,
+      availableBase: available._sum.deltaBase ?? 0,
+      itemName: item.name,
+      storeName: location.name,
+    }),
+    issue: {
+      itemId: item.id,
+      stockLocationId: location.id,
+      quantityKg: input.feedKg,
+    },
+  };
+}
 
 /**
  * Submit one morning's record.
@@ -222,6 +436,12 @@ export async function submitDailyRecord(
     },
     context.thresholds,
   );
+
+  // Is the store able to cover what was fed? Asked BEFORE the transaction so a
+  // shortfall is something the person confirms, not something they discover
+  // afterwards — and never something that refuses the record.
+  const feedPlan = await planFeedIssue(input, context);
+  warnings.push(...feedPlan.warnings);
 
   if (warnings.length > 0) {
     const token = warningToken(warnings);
@@ -277,6 +497,21 @@ export async function submitDailyRecord(
           reasonCode: input.cullReason ?? null,
           sourceType: 'dailyRecord',
           sourceId: record.id,
+        });
+      }
+
+      // Feed leaves the store in the SAME transaction as the record that says
+      // it was fed. Two writes that can disagree are two writes that eventually
+      // will.
+      if (feedPlan.issue) {
+        await issueFeedWithin(tx, principal, {
+          itemId: feedPlan.issue.itemId,
+          stockLocationId: feedPlan.issue.stockLocationId,
+          animalGroupId: flockId,
+          quantityKg: feedPlan.issue.quantityKg,
+          occurredOn: input.onDate,
+          dailyRecordId: record.id,
+          flockCode: context.code,
         });
       }
 
