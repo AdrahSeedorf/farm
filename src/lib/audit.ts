@@ -31,6 +31,7 @@ export type AuditAction =
   | 'item.update'
   | 'item.archive'
   | 'stockLocation.create'
+  | 'stock.receipt'
   | 'user.create'
   | 'user.update'
   | 'user.deactivate'

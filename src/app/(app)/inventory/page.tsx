@@ -28,6 +28,7 @@ export default async function InventoryPage({
     currentUserCan('inventory:edit'),
     currentUserCan('inventory:manage'),
   ]);
+  const canReceive = canCreate;
 
   // Grouped by category because that is how a store is walked: feed in one
   // corner, vaccines in the fridge, crates by the door.
@@ -69,9 +70,17 @@ export default async function InventoryPage({
           {canCreate ? (
             <Link
               href="/inventory/new"
-              className="inline-flex min-h-touch items-center rounded-control bg-brand-primary px-5 text-[15px] font-semibold text-text-inverse hover:bg-brand-primary-hover"
+              className="inline-flex min-h-touch items-center rounded-control border border-border-strong px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
             >
               Add item
+            </Link>
+          ) : null}
+          {canReceive ? (
+            <Link
+              href="/inventory/receive"
+              className="inline-flex min-h-touch items-center rounded-control bg-brand-primary px-5 text-[15px] font-semibold text-text-inverse hover:bg-brand-primary-hover"
+            >
+              Record a delivery
             </Link>
           ) : null}
         </div>
@@ -126,9 +135,12 @@ export default async function InventoryPage({
                   >
                     <div className="min-w-[10rem] flex-1">
                       <div className="flex flex-wrap items-baseline gap-2">
-                        <span className="text-[15px] font-semibold text-text-primary">
+                        <Link
+                          href={`/inventory/${item.id}`}
+                          className="text-[15px] font-semibold text-text-primary underline-offset-2 hover:text-brand-primary hover:underline"
+                        >
                           {item.name}
-                        </span>
+                        </Link>
                         <span className="font-mono text-[12px] text-text-muted">{item.sku}</span>
                         {item.isActive ? null : (
                           <span className="text-[12px] font-semibold text-text-muted">

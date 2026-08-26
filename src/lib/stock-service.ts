@@ -2,7 +2,7 @@ import 'server-only';
 import { db } from '@/lib/db';
 import type { Principal } from '@/lib/rbac';
 import { orgFilter, siteIdFilter, hasFullSiteAccess } from '@/lib/scope';
-import { stockStatus, type StockStatus } from '@/lib/stock-ledger';
+import { stockStatus, type BatchStock, type StockStatus } from '@/lib/stock-ledger';
 import { fromBase, type Dimension } from '@/lib/uom';
 
 /**
@@ -117,6 +117,66 @@ export async function itemById(principal: Principal, itemId: string) {
 /** How many movements an item has, across every site — not just the viewer's. */
 export async function movementCountForItem(itemId: string): Promise<number> {
   return db.stockMovement.count({ where: { itemId } });
+}
+
+/**
+ * Batches of one item with what is left in each.
+ *
+ * Quantities come from the ledger, not from a column on the batch, so a batch
+ * that was received and then half issued reports what is actually there.
+ */
+export async function itemBatches(principal: Principal, itemId: string): Promise<BatchStock[]> {
+  const [batches, sums] = await Promise.all([
+    db.itemBatch.findMany({
+      where: { itemId, item: orgFilter(principal) },
+      orderBy: [{ expiresOn: 'asc' }, { receivedOn: 'asc' }],
+    }),
+    db.stockMovement.groupBy({
+      by: ['itemBatchId'],
+      where: { itemId, itemBatchId: { not: null }, ...movementScope(principal) },
+      _sum: { deltaBase: true },
+    }),
+  ]);
+
+  const onHand = new Map(sums.map((s) => [s.itemBatchId, s._sum.deltaBase ?? 0]));
+  return batches.map((b) => ({
+    id: b.id,
+    batchNumber: b.batchNumber,
+    expiresOn: b.expiresOn,
+    onHand: onHand.get(b.id) ?? 0,
+    unitCostPesewas: b.unitCostPesewas,
+  }));
+}
+
+/**
+ * Quantity on hand for one item, in the base unit.
+ *
+ * Aggregated over ALL movements, not summed from the batches. A batch total
+ * misses anything recorded without one — a stock-count adjustment, most often —
+ * and a headline figure that quietly ignores adjustments is the figure that
+ * disagrees with the shelf.
+ */
+export async function itemOnHand(principal: Principal, itemId: string): Promise<number> {
+  const total = await db.stockMovement.aggregate({
+    where: { itemId, item: orgFilter(principal), ...movementScope(principal) },
+    _sum: { deltaBase: true },
+  });
+  return total._sum.deltaBase ?? 0;
+}
+
+/** The movement history for one item, newest first. */
+export async function itemMovements(principal: Principal, itemId: string, take = 25) {
+  return db.stockMovement.findMany({
+    where: { itemId, item: orgFilter(principal), ...movementScope(principal) },
+    orderBy: [{ occurredOn: 'desc' }, { createdAt: 'desc' }],
+    take,
+    include: {
+      itemBatch: { select: { batchNumber: true } },
+      stockLocation: { select: { name: true } },
+      enteredUom: { select: { symbol: true, name: true } },
+      recordedBy: { select: { name: true } },
+    },
+  });
 }
 
 /** Stores and stores-within-stores this principal may see. */

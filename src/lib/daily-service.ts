@@ -1,8 +1,8 @@
 import 'server-only';
-import { createHash } from 'node:crypto';
 import { db } from '@/lib/db';
 import { recordEventWithin, FlockError } from '@/lib/flock-service';
-import { checkDailyRecord, thresholdsFrom, type Warning } from '@/lib/daily-checks';
+import { checkDailyRecord, thresholdsFrom } from '@/lib/daily-checks';
+import { warningToken, type Warning } from '@/lib/warnings';
 import { broodingCurveFrom, isBroodingAge, broodingTargetC } from '@/lib/rearing';
 import { ageInDays } from '@/lib/metrics';
 import type { Principal } from '@/lib/rbac';
@@ -178,13 +178,9 @@ export type SubmitResult =
  *   the person actually read. Change the entry, and any new warning has to be
  *   shown and accepted on its own terms.
  */
-function warningToken(warnings: Warning[]): string {
-  const canonical = warnings
-    .map((w) => `${w.field}:${w.message}`)
-    .sort()
-    .join('|');
-  return createHash('sha1').update(canonical).digest('hex').slice(0, 16);
-}
+// `warningToken` is implemented in `warnings.ts` so the receipt form and the
+// daily record cannot drift into two different fingerprints of the same idea.
+// A drifted fingerprint fails OPEN: it accepts warnings nobody was shown.
 
 /**
  * Submit one morning's record.

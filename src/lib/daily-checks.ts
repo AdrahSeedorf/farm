@@ -19,10 +19,8 @@
 
 import { assessTemperature, chickBehaviour, litterCondition, type BroodingCurve } from '@/lib/rearing';
 
-export interface Warning {
-  field: string;
-  message: string;
-}
+export type { Warning } from '@/lib/warnings';
+import type { Warning } from '@/lib/warnings';
 
 export interface DailyCheckInput {
   population: number;

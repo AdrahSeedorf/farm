@@ -45,7 +45,16 @@ export const CATEGORY_META: Record<
     label: 'Feed',
     hint: 'Chick mash, grower, layer mash, concentrates.',
     suggestedUnits: ['bag_50kg', 'bag_25kg', 'kg', 'tonne'],
-    perishableByDefault: true,
+    /**
+     * FALSE, deliberately, even though feed does go stale.
+     *
+     * Marking it expiring means every delivery with no date on the bag raises a
+     * warning, and feed is the item that arrives most often. A warning that
+     * fires on almost every entry stops being read, and then the vaccine
+     * warning — the one that matters — gets clicked through with it. A farm
+     * that does track feed dates ticks the box on that item.
+     */
+    perishableByDefault: false,
   },
   VACCINE: {
     label: 'Vaccine',

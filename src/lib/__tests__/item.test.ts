@@ -116,10 +116,17 @@ describe('category defaults', () => {
     expect(CATEGORY_META.VACCINE.suggestedUnits).toContain('dose');
   });
 
-  it('marks vaccines and feed as expiring by default', () => {
+  it('marks vaccines and medicines as expiring by default', () => {
     expect(CATEGORY_META.VACCINE.perishableByDefault).toBe(true);
-    expect(CATEGORY_META.FEED.perishableByDefault).toBe(true);
+    expect(CATEGORY_META.MEDICINE.perishableByDefault).toBe(true);
     expect(CATEGORY_META.EQUIPMENT.perishableByDefault).toBe(false);
+  });
+
+  it('does NOT mark feed as expiring, to keep the warning meaningful', () => {
+    // Feed arrives most often and rarely carries a readable date. A warning on
+    // almost every delivery gets clicked through — and takes the vaccine
+    // warning with it.
+    expect(CATEGORY_META.FEED.perishableByDefault).toBe(false);
   });
 });
 
