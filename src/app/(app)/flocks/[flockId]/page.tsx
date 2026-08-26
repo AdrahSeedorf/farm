@@ -8,9 +8,11 @@ import { orgFilter, canAccessSite } from '@/lib/scope';
 import { totalsFor } from '@/lib/flock-service';
 import { REASON_CODES, reasonLabel, EVENT_LABELS } from '@/lib/reason-codes';
 import { ageInDays, ageInWeeks, cumulativeMortalityPct, round } from '@/lib/metrics';
+import { stageDrift } from '@/lib/rearing';
 import { KpiTile, metric } from '@/components/ui/KpiTile';
 import { EventForm } from '../EventForm';
-import { recordFlockEvent } from '../actions';
+import { StageCard } from '../StageCard';
+import { recordFlockEvent, changeStage } from '../actions';
 
 export const metadata: Metadata = { title: 'Flock' };
 
@@ -29,7 +31,12 @@ export default async function FlockPage({
       site: { select: { id: true, name: true } },
       productionUnit: { select: { name: true, code: true } },
       currentStage: { select: { name: true } },
-      productionType: { select: { name: true } },
+      productionType: {
+        select: {
+          name: true,
+          lifecycleStages: { orderBy: { sequence: 'asc' } },
+        },
+      },
     },
   });
   if (!flock) notFound();
@@ -48,9 +55,24 @@ export default async function FlockPage({
   });
 
   const canRecord = await currentUserCan('dailyRecord:create', flock.siteId);
+  const canEditFlock = await currentUserCan('flock:edit', flock.siteId);
   const today = new Date();
   const lost = totals.placed - totals.population;
   const mortalityPct = cumulativeMortalityPct(lost, totals.placed);
+
+  // Does the recorded stage still match the flock's age?
+  const drift = stageDrift(
+    ageInDays(flock.dateOfHatch, today),
+    flock.currentStageId,
+    flock.productionType.lifecycleStages.map((stage) => ({
+      id: stage.id,
+      key: stage.key,
+      name: stage.name,
+      sequence: stage.sequence,
+      typicalStartAgeDays: stage.typicalStartAgeDays,
+      typicalEndAgeDays: stage.typicalEndAgeDays,
+    })),
+  );
 
   // Running population for each row: what the flock held immediately AFTER that
   // event. Events are newest-first, so we walk back from the current total by
@@ -116,6 +138,28 @@ export default async function FlockPage({
           detail={flock.closedAt ? 'Flock closed' : 'Flock open'}
         />
       </div>
+
+      {!flock.closedAt ? (
+        <div className="mt-8">
+          <StageCard
+            action={changeStage.bind(null, flock.id)}
+            stages={flock.productionType.lifecycleStages.map((stage) => ({
+              id: stage.id,
+              name: stage.name,
+              sequence: stage.sequence,
+            }))}
+            currentStageId={flock.currentStageId}
+            currentStageName={drift.current?.name ?? null}
+            suggestedStageId={drift.suggested?.id ?? null}
+            suggestedStageName={drift.suggested?.name ?? null}
+            overdue={drift.overdue}
+            daysOverdue={drift.daysOverdue}
+            ageDays={ageInDays(flock.dateOfHatch, today)}
+            today={today.toISOString().slice(0, 10)}
+            canEdit={canEditFlock}
+          />
+        </div>
+      ) : null}
 
       {canRecord && !flock.closedAt ? (
         <section className="mt-8 rounded-card border border-border-default bg-surface-card p-5">
