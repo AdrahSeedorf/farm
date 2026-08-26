@@ -9,6 +9,7 @@ import {
   weightedUnitCost,
   daysOfCover,
   assertStockCoherent,
+  stockStatus,
   StockError,
   type StockMovementRecord,
   type BatchStock,
@@ -236,5 +237,42 @@ describe('ledger coherence', () => {
         move('ISSUE', 0.3, '2026-03-02'),
       ]),
     ).not.toThrow();
+  });
+});
+
+describe('stock status against thresholds', () => {
+  it('reports empty before anything else', () => {
+    expect(stockStatus(0, 200, 100)).toBe('OUT');
+    expect(stockStatus(-5, 200, 100)).toBe('OUT');
+  });
+
+  it('treats the minimum as the harder floor', () => {
+    expect(stockStatus(80, 200, 100)).toBe('CRITICAL');
+    expect(stockStatus(150, 200, 100)).toBe('LOW');
+    expect(stockStatus(500, 200, 100)).toBe('OK');
+  });
+
+  it('checks the minimum first even when the farm sets them the wrong way round', () => {
+    // Minimum above reorder is a data-entry mistake, but the urgent one must
+    // still win — silently reporting "reorder" on critically low feed is worse
+    // than reporting the farm's own inconsistency back to them.
+    expect(stockStatus(120, 100, 200)).toBe('CRITICAL');
+  });
+
+  it('fires AT the threshold, not below it', () => {
+    expect(stockStatus(200, 200, null)).toBe('LOW');
+    expect(stockStatus(201, 200, null)).toBe('OK');
+  });
+
+  it('distinguishes "fine" from "nobody said what fine means"', () => {
+    expect(stockStatus(500, null, null)).toBe('UNTRACKED');
+    expect(stockStatus(500, 200, null)).toBe('OK');
+  });
+
+  it('honours a threshold of zero as a real setting', () => {
+    // Alert only on stockout is a legitimate choice for an item that is ordered
+    // to demand — it must not be read as "no threshold set".
+    expect(stockStatus(1, 0, null)).toBe('OK');
+    expect(stockStatus(0, 0, null)).toBe('OUT');
   });
 });

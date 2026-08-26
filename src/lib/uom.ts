@@ -42,6 +42,17 @@ export const SEED_UNITS: readonly Uom[] = [
   { key: 'box', name: 'Box (12 crates)', symbol: 'box', dimension: 'COUNT', factorToBase: 360 },
   { key: 'bird', name: 'Bird', symbol: 'bird', dimension: 'COUNT', factorToBase: 1 },
 
+  // Vaccines are bought by the vial and given by the dose, so both must exist.
+  //
+  // THERE IS DELIBERATELY NO UNIT CALLED SIMPLY "VIAL". A vial holds 500 doses
+  // or 1,000 doses depending on the product, and a unit whose conversion factor
+  // depends on which box you picked up is a unit that will eventually be wrong
+  // by a factor of two. Each vial size names its own dose count, and a farm that
+  // buys a 200-dose presentation adds that unit as data rather than guessing.
+  { key: 'dose', name: 'Dose', symbol: 'dose', dimension: 'COUNT', factorToBase: 1 },
+  { key: 'vial_500', name: 'Vial (500 doses)', symbol: 'vial-500', dimension: 'COUNT', factorToBase: 500 },
+  { key: 'vial_1000', name: 'Vial (1,000 doses)', symbol: 'vial-1k', dimension: 'COUNT', factorToBase: 1000 },
+
   { key: 'kg', name: 'Kilogram', symbol: 'kg', dimension: 'MASS', factorToBase: 1, isBase: true },
   { key: 'g', name: 'Gram', symbol: 'g', dimension: 'MASS', factorToBase: 0.001 },
   { key: 'bag_50kg', name: 'Bag (50 kg)', symbol: 'bag', dimension: 'MASS', factorToBase: 50 },

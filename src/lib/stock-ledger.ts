@@ -245,6 +245,36 @@ export function daysOfCover(onHand: number, averageDailyUse: number): number | n
   return onHand / averageDailyUse;
 }
 
+// ---------------------------------------------------------------------------
+// THRESHOLDS
+// ---------------------------------------------------------------------------
+
+export type StockStatus = 'OUT' | 'CRITICAL' | 'LOW' | 'OK' | 'UNTRACKED';
+
+/**
+ * Where a quantity sits against its thresholds. All figures in the base unit.
+ *
+ * `UNTRACKED` is returned when no threshold is set, and is deliberately not the
+ * same as `OK`: "this is fine" and "nobody said what fine means" are different
+ * statements, and a dashboard that renders them identically will show a store
+ * full of green while half of it has never been given a reorder level.
+ *
+ * The order of the checks matters. Minimum stock is the harder floor, so it is
+ * tested before the reorder level even when a farm has set them the wrong way
+ * round.
+ */
+export function stockStatus(
+  onHand: number,
+  reorderLevel: number | null,
+  minimumStock: number | null,
+): StockStatus {
+  if (onHand <= 0) return 'OUT';
+  if (minimumStock !== null && onHand <= minimumStock) return 'CRITICAL';
+  if (reorderLevel !== null && onHand <= reorderLevel) return 'LOW';
+  if (reorderLevel === null && minimumStock === null) return 'UNTRACKED';
+  return 'OK';
+}
+
 /**
  * Sanity check for the rebuild job: stock should never be negative.
  *

@@ -13,6 +13,7 @@ const ITEMS: { href: string; label: string; permission: Permission }[] = [
   { href: '/daily', label: 'Today', permission: 'dailyRecord:view' },
   { href: '/dashboard', label: 'Dashboard', permission: 'report:view' },
   { href: '/flocks', label: 'Flocks', permission: 'flock:view' },
+  { href: '/inventory', label: 'Store', permission: 'inventory:view' },
   { href: '/sites', label: 'Farms', permission: 'site:view' },
   { href: '/settings', label: 'Settings', permission: 'settings:view' },
 ];

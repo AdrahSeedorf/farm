@@ -47,3 +47,6 @@ src/generated/
 .env
 .env.local
 .env*.local
+
+# Scratch — safe to remove
+_to_delete/
