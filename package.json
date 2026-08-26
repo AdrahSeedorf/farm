@@ -17,6 +17,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "rebuild:derived": "tsx scripts/rebuild-derived.ts",
+    "standards:load": "tsx scripts/load-standards.ts",
     "user:password": "tsx scripts/set-password.ts",
     "postinstall": "prisma generate"
   },
