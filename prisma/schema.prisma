@@ -43,6 +43,7 @@ model Organisation {
   speciesProfiles SpeciesProfile[]
   items           Item[]
   auditLogs       AuditLog[]
+  healthProgrammes HealthProgramme[]
 }
 
 model Site {
@@ -111,6 +112,7 @@ model SpeciesProfile {
   organisation    Organisation            @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   productionTypes ProductionTypeProfile[]
   animalGroups    AnimalGroup[]
+  healthProgrammes HealthProgramme[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -136,6 +138,7 @@ model ProductionTypeProfile {
   speciesProfile SpeciesProfile   @relation(fields: [speciesProfileId], references: [id], onDelete: Cascade)
   lifecycleStages LifecycleStage[]
   animalGroups   AnimalGroup[]
+  healthProgrammes HealthProgramme[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -191,6 +194,11 @@ model AnimalGroup {
   /// rebuildable with `npm run rebuild:derived`.
   currentStageId          String?
 
+  /// The health programme this flock follows, if any. Nullable on purpose: a
+  /// flock placed before the vet has supplied a programme must still be
+  /// recordable, and the schedule simply says there is nothing scheduled.
+  healthProgrammeId       String?
+
   closedAt                DateTime?
   notes                   String?
 
@@ -199,12 +207,14 @@ model AnimalGroup {
   speciesProfile SpeciesProfile        @relation(fields: [speciesProfileId], references: [id])
   productionType ProductionTypeProfile @relation(fields: [productionTypeProfileId], references: [id])
   currentStage   LifecycleStage?       @relation(fields: [currentStageId], references: [id])
+  healthProgramme HealthProgramme?     @relation(fields: [healthProgrammeId], references: [id])
 
   events        AnimalGroupEvent[]
   snapshots     AnimalGroupSnapshot[]
   weightSamples WeightSample[]
   costEntries   FlockCostEntry[]
   dailyRecords  DailyRecord[]
+  healthEvents  HealthEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -477,6 +487,8 @@ model Item {
   stockUom     UnitOfMeasure   @relation(fields: [stockUomId], references: [id])
   batches      ItemBatch[]
   movements    StockMovement[]
+  programmeItems HealthProgrammeItem[]
+  healthEvents   HealthEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -496,8 +508,9 @@ model ItemBatch {
   unitCostPesewas   Int?
   receivedOn        DateTime  @db.Date
 
-  item      Item            @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  movements StockMovement[]
+  item         Item            @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  movements    StockMovement[]
+  healthEvents HealthEvent[]
 
   createdAt DateTime @default(now())
 
@@ -570,6 +583,207 @@ model StockMovement {
 }
 
 // ---------------------------------------------------------------------------
+// HEALTH
+//
+// THE GOVERNING RULE OF THIS SECTION: THE SYSTEM HOLDS NO MEDICAL OPINION.
+//
+// There is no built-in vaccination schedule, no default withdrawal period and
+// no suggested dose anywhere in this codebase. Every figure below arrives as
+// DATA, entered or imported by the farm from a programme its veterinarian
+// supplied, and every programme records who supplied it and when.
+//
+// This is not caution for its own sake. A shipped default would be trusted: a
+// farmhand would give a vaccine on day 14 because the screen said day 14, and
+// nobody could later say which vet stood behind that number, for which breed,
+// under which disease pressure. Ghana's Newcastle challenge is not Europe's.
+// Getting this wrong kills flocks.
+//
+// What the system DOES do is arithmetic: given a programme and a date of hatch,
+// it works out dates, notices what is due, and refuses to let a withdrawal
+// period be forgotten. That is bookkeeping, and bookkeeping is what software
+// should be trusted with.
+// ---------------------------------------------------------------------------
+
+enum HealthEventType {
+  VACCINATION
+  MEDICATION
+  SUPPLEMENT
+  TREATMENT
+  VET_VISIT
+  DIAGNOSIS
+  POST_MORTEM
+  OTHER
+}
+
+/// How something was given. Route matters clinically — the same vaccine by eye
+/// drop and in drinking water are not interchangeable — so it is recorded
+/// rather than left in a note.
+enum AdministrationRoute {
+  DRINKING_WATER
+  EYE_DROP
+  NASAL_DROP
+  SPRAY
+  WING_WEB
+  INJECTION_SUBCUTANEOUS
+  INJECTION_INTRAMUSCULAR
+  IN_FEED
+  TOPICAL
+  ORAL
+  OTHER
+}
+
+/// A health programme: a list of planned interventions keyed to AGE, not dates.
+///
+/// Keyed to age because a flock delivered a week late is still the age it
+/// hatched, and every schedule in poultry is written against age in days.
+model HealthProgramme {
+  id                      String  @id @default(cuid())
+  organisationId          String
+  /// Optional narrowing, so a farm running more than one species or type can
+  /// keep their programmes apart. Null means "applies to anything".
+  speciesProfileId        String?
+  productionTypeProfileId String?
+
+  name        String
+  description String?
+
+  // --- Provenance ---------------------------------------------------------
+  // Required by the brief and by common sense: every scheduled intervention
+  // must trace back to a named human who stood behind it.
+
+  /// The veterinarian, hatchery or supplier this programme came from.
+  sourceName  String?
+  /// Their role or practice, e.g. "Veterinary Officer, Ashanti".
+  sourceRole  String?
+  /// When they supplied or last reviewed it. A programme nobody has looked at
+  /// in three years is a fact the farm should be able to see.
+  reviewedOn  DateTime? @db.Date
+
+  isActive Boolean @default(true)
+
+  organisation   Organisation           @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  speciesProfile SpeciesProfile?        @relation(fields: [speciesProfileId], references: [id])
+  productionType ProductionTypeProfile? @relation(fields: [productionTypeProfileId], references: [id])
+
+  items       HealthProgrammeItem[]
+  animalGroups AnimalGroup[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, name])
+  @@index([organisationId, isActive])
+}
+
+/// One planned intervention within a programme.
+model HealthProgrammeItem {
+  id                String @id @default(cuid())
+  healthProgrammeId String
+
+  /// Age in DAYS at which this is planned. The whole schedule hangs off this.
+  ageDays    Int
+  /// How many days either side still counts as "on time". Entered by the farm;
+  /// there is no default that means anything clinically, so the column default
+  /// is only a starting point for the form.
+  windowDays Int    @default(2)
+
+  /// What it is, in the farm's own words: "Newcastle — La Sota", "Gumboro".
+  name      String
+  eventType HealthEventType     @default(VACCINATION)
+  route     AdministrationRoute?
+
+  /// Optional link to the store, so giving it draws real stock and costs the
+  /// flock. Null for anything the farm does not hold as inventory.
+  itemId      String?
+  /// Quantity per bird, in the item's BASE unit (doses, ml, grams).
+  dosePerBird Float?
+
+  /// Withdrawal periods, in days, AS STATED ON THE PRODUCT LABEL.
+  /// Null means none was recorded — which is not the same as none applying.
+  eggWithdrawalDays  Int?
+  meatWithdrawalDays Int?
+
+  notes     String?
+  /// Two interventions can fall on the same day; this keeps their order stable.
+  sortOrder Int     @default(0)
+
+  programme HealthProgramme @relation(fields: [healthProgrammeId], references: [id], onDelete: Cascade)
+  item      Item?           @relation(fields: [itemId], references: [id])
+  events    HealthEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([healthProgrammeId, ageDays])
+}
+
+/// Something that was actually done to a flock.
+///
+/// DELIBERATELY NOT AN AnimalGroupEvent. That ledger exists to answer "how many
+/// birds are there", and every row in it moves the count. A vaccination moves no
+/// birds. Mixing the two would mean every population sum had to know which event
+/// types to ignore — and the day someone forgets, the flock count is wrong.
+/// Deaths following a reaction are recorded on the population ledger as
+/// mortality, in the ordinary way, and the two are linked by date.
+model HealthEvent {
+  id              String  @id @default(cuid())
+  animalGroupId   String
+  /// Which planned item this fulfils, when it fulfils one. Null for anything
+  /// unplanned — an outbreak, a vet visit, a treatment nobody scheduled.
+  programmeItemId String?
+
+  type       HealthEventType
+  name       String
+  occurredOn DateTime            @db.Date
+  /// Age of the flock on the day, stamped at write time so the record still
+  /// reads correctly if a hatch date is ever corrected.
+  ageDays    Int
+  route      AdministrationRoute?
+
+  /// How many birds this covered. Null when it does not apply (a vet visit).
+  birdsTreated Int?
+
+  // --- What it consumed ---------------------------------------------------
+  itemId       String?
+  itemBatchId  String?
+  /// Quantity used, in the item's base unit. Written by the health service, which
+  /// issues the same quantity from the store in one transaction.
+  quantityBase Float?
+  /// INTEGER PESEWAS, snapshotted at the time. See src/lib/money.ts.
+  costPesewas  Int?
+
+  // --- Withdrawal ---------------------------------------------------------
+  // Copied ONTO THE EVENT rather than read back off the programme, because the
+  // product actually used may differ from the one planned, and a withdrawal
+  // period that changes retroactively is a food-safety failure.
+  eggWithdrawalDays  Int?
+  meatWithdrawalDays Int?
+
+  // --- Who ----------------------------------------------------------------
+  /// The person who physically gave it. Free text: many farmhands and visiting
+  /// vets have no account, and forcing one would mean the name goes unrecorded.
+  administeredBy String?
+  /// The veterinarian who attended or authorised it.
+  vetName        String?
+  diagnosis      String?
+  notes          String?
+
+  recordedById String
+
+  animalGroup   AnimalGroup          @relation(fields: [animalGroupId], references: [id], onDelete: Cascade)
+  programmeItem HealthProgrammeItem? @relation(fields: [programmeItemId], references: [id])
+  item          Item?                @relation(fields: [itemId], references: [id])
+  itemBatch     ItemBatch?           @relation(fields: [itemBatchId], references: [id])
+  recordedBy    User                 @relation(fields: [recordedById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([animalGroupId, occurredOn])
+  @@index([programmeItemId])
+  @@index([animalGroupId, type])
+}
+
+// ---------------------------------------------------------------------------
 // IDENTITY & ACCESS
 // Permissions are `resource:action` strings. Roles bundle them. Access is
 // additionally scoped to sites. Enforcement lives in ONE server-side gate.
@@ -602,6 +816,7 @@ model User {
   stockMovements     StockMovement[]
   dailyRecords       DailyRecord[]
   verifiedRecords    DailyRecord[]      @relation("DailyRecordVerifier")
+  healthEvents       HealthEvent[]
   auditLogs          AuditLog[]
 
   createdAt DateTime @default(now())
