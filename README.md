@@ -3,7 +3,7 @@
 The digital operating system for a commercial layer poultry farm in Ghana, built so it can
 grow into other species and other sites without being rewritten.
 
-**Status:** Milestone 3 — Flocks & the population ledger. See [Milestones](#milestones).
+**Status:** Milestone 4 — The daily record. See [Milestones](#milestones).
 
 ---
 
@@ -44,7 +44,7 @@ without a connection.
 | `npm run build` | Production build |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
-| `npm run test` | Vitest (135 tests) |
+| `npm run test` | Vitest (172 tests) |
 | `npm run db:migrate` | Create/apply a migration |
 | `npm run db:seed` | Seed reference and starter data |
 | `npm run db:studio` | Browse the database |
@@ -160,6 +160,8 @@ src/
     ghana.ts             The 16 regions, as data
     flock-service.ts     THE ONLY writer to the population ledger
     reason-codes.ts      Controlled vocabulary for why birds left the flock
+    daily-service.ts     One morning's entry, in one transaction
+    daily-checks.ts      Plausibility warnings that never block
   auth.ts                Auth.js configuration and the revocation callback
   proxy.ts               Redirect convenience only — NOT the security boundary
 ```
@@ -243,6 +245,34 @@ would look plausible and every derived number would be wrong.
 Run `npm run rebuild:derived` to reconstruct cached values from the ledger. Being
 able to run it is what makes it safe to denormalise anything at all.
 
+### The daily record (Milestone 4)
+
+The screen that gets opened every morning, so its speed is a feature. Four
+numbers and a note, 60px targets, numeric keypads, and yesterday's figures shown
+as hints underneath — a number out of character is far easier to spot beside the
+one before it than in isolation. Nothing is required: a morning where nothing
+died should take no typing at all.
+
+**It warns; it never blocks.** A system that refuses an unusual number teaches
+people to stop recording unusual numbers — and the morning you lose 80 birds to a
+brooder failure is exactly the entry a strict validator would reject. Odd figures
+raise a confirmation, nothing is written until you confirm, and what was flagged
+and accepted is stored on the record so a run of odd days can be reviewed later.
+
+**One submission, one transaction.** The record and its ledger events land
+together or not at all. A written record saying six birds died, beside a ledger
+that never lost them, is the exact disagreement the ledger exists to prevent.
+
+**Records are never edited.** Once submitted, the mortality is on the ledger and
+the birds are gone from the count. Editing would mean silently reversing ledger
+events. A mistake is fixed like any other — a correction on the flock, visible in
+the timeline beside the original.
+
+**Blank is not zero.** `z.coerce.number()` turns `""` into `0`, so an unmeasured
+quantity would silently become a measured zero, dragging every feed average down
+for as long as the records exist. Counts treat blank as none; measured quantities
+treat blank as *not measured*.
+
 ### Audit log
 
 Wired up now rather than later, because an audit trail added after the fact has a
@@ -283,7 +313,7 @@ considered and rejected in the specification with reasons.
 npm run test
 ```
 
-135 tests over the domain core. They exist to catch the failures that would actually hurt:
+172 tests over the domain core. They exist to catch the failures that would actually hurt:
 
 - money that drifts when a shared cost is split across flocks
 - a mortality event recorded with the wrong sign, resurrecting birds
@@ -304,7 +334,8 @@ resource under any action, and sales staff cannot write to flock or health recor
 | 1 | Auth & RBAC — login, sessions, rate limiting, the gate | ✅ Done |
 | 2 | Org & sites — farms, houses, site scoping, audit log | ✅ Done |
 | 3 | Flocks — placement, population ledger, timeline | ✅ Done |
-| 4 | Daily record — the core mobile entry screen | Next |
+| 4 | Daily record — the core mobile entry screen | ✅ Done |
+| 5 | Rearing — chick arrival, brooding, weight & uniformity | Next |
 | 5 | Rearing — chick arrival, brooding, weight & uniformity | |
 | 6 | Feed & inventory | |
 | 7 | Health — programmes, vaccination scheduling, medication | |

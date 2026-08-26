@@ -1,4 +1,5 @@
 import 'server-only';
+import type { Prisma } from '@/generated/prisma/client';
 import { db } from '@/lib/db';
 import { deltaFor, type AnimalGroupEventType } from '@/lib/ledger';
 import { ageInDays } from '@/lib/metrics';
@@ -56,61 +57,75 @@ export async function recordAnimalGroupEvent(
   principal: Principal,
   input: RecordEventInput,
 ): Promise<{ id: string; delta: number; population: number }> {
+  return db.$transaction((tx) => recordEventWithin(tx, principal, input));
+}
+
+/**
+ * The same write, INSIDE a transaction the caller already owns.
+ *
+ * The daily record needs this: one morning's entry creates a DailyRecord and up
+ * to two ledger events, and those must all land or none of them must. A record
+ * saying "6 died" alongside a ledger that never lost the birds is precisely the
+ * disagreement the ledger exists to prevent.
+ */
+export async function recordEventWithin(
+  tx: Prisma.TransactionClient,
+  principal: Principal,
+  input: RecordEventInput,
+): Promise<{ id: string; delta: number; population: number }> {
   const delta = deltaFor(input.type, input.quantity);
 
-  return db.$transaction(async (tx) => {
-    const group = await tx.animalGroup.findUnique({
-      where: { id: input.animalGroupId },
-      select: { id: true, dateOfHatch: true, closedAt: true, siteId: true },
-    });
-    if (!group) throw new FlockError('That flock no longer exists.');
-    if (group.closedAt && input.type !== 'ADJUSTMENT') {
-      throw new FlockError(
-        'This flock is closed. Reopen it before recording new events, or record a correction.',
-      );
-    }
-
-    const current = await tx.animalGroupEvent.aggregate({
-      where: { animalGroupId: input.animalGroupId },
-      _sum: { delta: true },
-    });
-    const before = current._sum.delta ?? 0;
-    const after = before + delta;
-
-    if (after < 0) {
-      throw new FlockError(
-        `Cannot remove ${Math.abs(delta)} birds — the flock holds ${before}. ` +
-          `Check whether this belongs to a different flock or house.`,
-      );
-    }
-
-    const event = await tx.animalGroupEvent.create({
-      data: {
-        animalGroupId: input.animalGroupId,
-        type: input.type,
-        delta,
-        occurredOn: input.occurredOn,
-        ageDays: ageInDays(group.dateOfHatch, input.occurredOn),
-        reasonCode: input.reasonCode ?? null,
-        notes: input.notes ?? null,
-        sourceType: input.sourceType ?? null,
-        sourceId: input.sourceId ?? null,
-        toStageId: input.toStageId ?? null,
-        recordedById: principal.userId,
-      },
-      select: { id: true },
-    });
-
-    // The denormalised stage cache follows the ledger, never the other way round.
-    if (input.type === 'STAGE_CHANGE' && input.toStageId) {
-      await tx.animalGroup.update({
-        where: { id: input.animalGroupId },
-        data: { currentStageId: input.toStageId },
-      });
-    }
-
-    return { id: event.id, delta, population: after };
+  const group = await tx.animalGroup.findUnique({
+    where: { id: input.animalGroupId },
+    select: { id: true, dateOfHatch: true, closedAt: true, siteId: true },
   });
+  if (!group) throw new FlockError('That flock no longer exists.');
+  if (group.closedAt && input.type !== 'ADJUSTMENT') {
+    throw new FlockError(
+      'This flock is closed. Reopen it before recording new events, or record a correction.',
+    );
+  }
+
+  const current = await tx.animalGroupEvent.aggregate({
+    where: { animalGroupId: input.animalGroupId },
+    _sum: { delta: true },
+  });
+  const before = current._sum.delta ?? 0;
+  const after = before + delta;
+
+  if (after < 0) {
+    throw new FlockError(
+      `Cannot remove ${Math.abs(delta)} birds — the flock holds ${before}. ` +
+        `Check whether this belongs to a different flock or house.`,
+    );
+  }
+
+  const event = await tx.animalGroupEvent.create({
+    data: {
+      animalGroupId: input.animalGroupId,
+      type: input.type,
+      delta,
+      occurredOn: input.occurredOn,
+      ageDays: ageInDays(group.dateOfHatch, input.occurredOn),
+      reasonCode: input.reasonCode ?? null,
+      notes: input.notes ?? null,
+      sourceType: input.sourceType ?? null,
+      sourceId: input.sourceId ?? null,
+      toStageId: input.toStageId ?? null,
+      recordedById: principal.userId,
+    },
+    select: { id: true },
+  });
+
+  // The denormalised stage cache follows the ledger, never the other way round.
+  if (input.type === 'STAGE_CHANGE' && input.toStageId) {
+    await tx.animalGroup.update({
+      where: { id: input.animalGroupId },
+      data: { currentStageId: input.toStageId },
+    });
+  }
+
+  return { id: event.id, delta, population: after };
 }
 
 /** Current population of one flock, derived from the ledger. */

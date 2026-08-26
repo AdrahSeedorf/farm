@@ -354,7 +354,25 @@ model DailyRecord {
   /// never merged.
   idempotencyKey   String   @unique
 
+  /// Feed given to this house today, in kilograms.
+  ///
+  /// A plain number for now. At Milestone 6 issuing feed also writes a
+  /// StockMovement against real inventory, and this column becomes a cache of
+  /// that — the same pattern as `AnimalGroup.currentStageId`. It stays here
+  /// because feed given is what the person in the house actually observes.
+  feedKg           Float?
+  waterLitres      Float?
+
   observations     String?
+
+  /// Plausibility warnings that were shown and accepted at entry time, e.g.
+  /// [{ "field": "mortality", "message": "..." }].
+  ///
+  /// The system warns but never blocks — a farm that cannot record what actually
+  /// happened stops being a record of anything. Keeping the accepted warnings
+  /// makes it possible to review, later, which figures were unusual when entered
+  /// rather than unusual in hindsight.
+  warnings         Json?
 
   recordedById     String
   verifiedById     String?

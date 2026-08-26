@@ -1,0 +1,154 @@
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { randomUUID } from 'node:crypto';
+import { pageGuard } from '@/lib/session';
+import { Forbidden } from '@/components/ui/Forbidden';
+import { canAccessSite } from '@/lib/scope';
+import { dailyContextFor } from '@/lib/daily-service';
+import { reasonCodesFor, reasonLabel } from '@/lib/reason-codes';
+import { DailyForm } from '../DailyForm';
+import { saveDailyRecord } from '../actions';
+
+export const metadata: Metadata = { title: 'Daily record' };
+
+export default async function DailyEntryPage({
+  params,
+}: {
+  params: Promise<{ flockId: string }>;
+}) {
+  const { flockId } = await params;
+  const { principal, allowed } = await pageGuard('dailyRecord:create');
+  if (!allowed) return <Forbidden area="daily records" roles={principal.roles} />;
+
+  const today = new Date();
+  const onDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+
+  const context = await dailyContextFor(flockId, onDate);
+  if (!context) notFound();
+  if (!canAccessSite(principal, context.siteId)) notFound();
+
+  const heading = context.houseName ?? context.code;
+
+  // Already done today — show what was recorded, read-only.
+  if (context.existing) {
+    const e = context.existing;
+    return (
+      <main className="mx-auto max-w-2xl px-5 py-8">
+        <Link href="/daily" className="text-[14px] font-semibold text-brand-primary">
+          ← Today
+        </Link>
+        <h1 className="mt-3 text-2xl font-bold text-text-primary">{heading}</h1>
+        <p className="mt-1 text-[15px] text-text-secondary">
+          Recorded for {onDate.toISOString().slice(0, 10)} by {e.recordedBy}
+          {e.verifiedBy ? ` · verified by ${e.verifiedBy}` : ''}
+        </p>
+
+        <dl className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-card border border-border-default bg-border-default sm:grid-cols-4">
+          {[
+            { label: 'Died', value: e.mortality },
+            { label: 'Culled', value: e.culls },
+            { label: 'Feed', value: e.feedKg == null ? '—' : `${e.feedKg} kg` },
+            { label: 'Water', value: e.waterLitres == null ? '—' : `${e.waterLitres} L` },
+          ].map((row) => (
+            <div key={row.label} className="bg-surface-card p-4">
+              <dt className="text-[11px] font-semibold uppercase tracking-[0.1em] text-text-muted">
+                {row.label}
+              </dt>
+              <dd className="tabular mt-1 text-2xl font-bold text-text-primary">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+
+        {e.observations ? (
+          <p className="mt-5 rounded-card border border-border-default bg-surface-card p-4 text-[15px] text-text-secondary">
+            {e.observations}
+          </p>
+        ) : null}
+
+        {e.warnings.length > 0 ? (
+          <div className="mt-5 rounded-card border border-status-attention bg-status-attention-bg p-4">
+            <p className="text-[13px] font-semibold uppercase tracking-[0.1em] text-[#6B4E12]">
+              Flagged at entry and confirmed
+            </p>
+            <ul className="mt-2 space-y-1 text-[14px] text-[#6B4E12]">
+              {e.warnings.map((w) => (
+                <li key={w.message}>{w.message}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        <div className="mt-7 rounded-card border border-border-default bg-surface-card p-5">
+          <h2 className="text-[15px] font-semibold text-text-primary">
+            Something wrong with this?
+          </h2>
+          <p className="mt-1.5 text-[14px] text-text-secondary">
+            Records are never edited or deleted — the mortality is already on the flock&apos;s
+            ledger. Record a correction instead, and both entries stay visible in the timeline.
+          </p>
+          <Link
+            href={`/flocks/${flockId}`}
+            className="mt-4 inline-flex min-h-touch items-center rounded-control border border-border-strong px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
+          >
+            Open the flock
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <main className="mx-auto max-w-2xl px-5 py-8">
+      <Link href="/daily" className="text-[14px] font-semibold text-brand-primary">
+        ← Today
+      </Link>
+
+      <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h1 className="text-2xl font-bold text-text-primary">{heading}</h1>
+        <span className="font-mono text-[13px] text-text-muted">{context.code}</span>
+        {context.stageName ? (
+          <span className="rounded bg-brand-primary-soft px-2 py-0.5 text-[12px] font-semibold text-brand-primary">
+            {context.stageName}
+          </span>
+        ) : null}
+      </div>
+      <p className="mt-1 text-[15px] text-text-secondary">
+        {context.population.toLocaleString('en-GH')} birds · day {context.ageDays} ·{' '}
+        {onDate.toISOString().slice(0, 10)}
+      </p>
+
+      <div className="mt-6 rounded-card border border-border-default bg-surface-card p-5 sm:p-6">
+        <DailyForm
+          action={saveDailyRecord.bind(null, flockId)}
+          today={onDate.toISOString().slice(0, 10)}
+          idempotencyKey={randomUUID()}
+          population={context.population}
+          previous={
+            context.previous
+              ? {
+                  onDate: context.previous.onDate.toISOString().slice(0, 10),
+                  mortality: context.previous.mortality,
+                  feedKg: context.previous.feedKg,
+                  waterLitres: context.previous.waterLitres,
+                }
+              : null
+          }
+          mortalityReasons={reasonCodesFor('MORTALITY').map((r) => ({
+            key: r.key,
+            label: reasonLabel(r.key),
+          }))}
+          cullReasons={reasonCodesFor('CULL').map((r) => ({
+            key: r.key,
+            label: reasonLabel(r.key),
+          }))}
+        />
+      </div>
+
+      <p className="mt-5 text-[13px] text-text-muted">
+        Leave anything blank that you did not measure. Blank is not the same as zero, and the
+        difference matters when these numbers are compared later.
+      </p>
+    </main>
+  );
+}

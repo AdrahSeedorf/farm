@@ -10,7 +10,8 @@ import type { Permission } from '@/lib/rbac';
  * gets the same answer as someone who never saw the link.
  */
 const ITEMS: { href: string; label: string; permission: Permission }[] = [
-  { href: '/dashboard', label: 'Today', permission: 'report:view' },
+  { href: '/daily', label: 'Today', permission: 'dailyRecord:view' },
+  { href: '/dashboard', label: 'Dashboard', permission: 'report:view' },
   { href: '/flocks', label: 'Flocks', permission: 'flock:view' },
   { href: '/sites', label: 'Farms', permission: 'site:view' },
   { href: '/settings', label: 'Settings', permission: 'settings:view' },
