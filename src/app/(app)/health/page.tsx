@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { pageGuard, currentUserCan } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
 import { listProgrammes, dueAcrossFlocks } from '@/lib/health-service';
+import { withdrawalsAcrossFlocks } from '@/lib/withdrawal-service';
 import { StatusBadge } from './StatusBadge';
 import { StatusChip } from './ScheduleList';
 import { scheduleSentence } from '@/lib/health-schedule';
@@ -13,9 +14,10 @@ export default async function HealthPage() {
   const { principal, allowed } = await pageGuard('health:view');
   if (!allowed) return <Forbidden area="health records" roles={principal.roles} />;
 
-  const [programmes, due, canCreate] = await Promise.all([
+  const [programmes, due, restricted, canCreate] = await Promise.all([
     listProgrammes(principal),
     dueAcrossFlocks(principal),
+    withdrawalsAcrossFlocks(principal),
     currentUserCan('health:create'),
   ]);
 
@@ -39,6 +41,35 @@ export default async function HealthPage() {
           </Link>
         ) : null}
       </div>
+
+      {restricted.length > 0 ? (
+        <section
+          role="alert"
+          className="mt-6 rounded-card border border-status-critical bg-status-critical-bg p-5 sm:p-6"
+        >
+          <h2 className="text-[12px] font-bold uppercase tracking-[0.14em] text-status-critical">
+            Withdrawal periods in force
+          </h2>
+          <ul className="mt-3 space-y-2">
+            {restricted.map((f) => (
+              <li key={f.flockId} className="text-[15px] text-status-critical">
+                <Link
+                  href={`/flocks/${f.flockId}/health`}
+                  className="font-semibold underline underline-offset-2"
+                >
+                  {f.houseName ?? f.flockCode}
+                </Link>{' '}
+                — {f.eggsClearOn ? `eggs until ${f.eggsClearOn.toISOString().slice(0, 10)}` : ''}
+                {f.eggsClearOn && f.meatClearsOn ? ', ' : ''}
+                {f.meatClearsOn ? `meat until ${f.meatClearsOn.toISOString().slice(0, 10)}` : ''}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 border-t border-status-critical/30 pt-2.5 text-[13px] text-status-critical">
+            Nothing from these flocks may be sold until the dates above.
+          </p>
+        </section>
+      ) : null}
 
       {due.length > 0 ? (
         <section className="mt-6 rounded-card border border-border-default bg-surface-card p-5 sm:p-6">

@@ -6,6 +6,8 @@ import { Forbidden } from '@/components/ui/Forbidden';
 import { canAccessSite } from '@/lib/scope';
 import { flockScheduleFor, assignableProgrammes } from '@/lib/health-service';
 import { healthEventsFor } from '@/lib/health-event-service';
+import { flockWithdrawals } from '@/lib/withdrawal-service';
+import { WithdrawalBanner } from '../../../health/WithdrawalBanner';
 import { formatGHS, pesewas } from '@/lib/money';
 import { ROUTE_LABELS, type Route } from '@/lib/health-programme';
 import { approvalNote } from '@/lib/health-programme';
@@ -33,12 +35,13 @@ export default async function FlockHealthPage({
   });
   if (!flockSite || !canAccessSite(principal, flockSite.siteId)) notFound();
 
-  const [canEdit, canRecord, canSeeCost, programmes, events] = await Promise.all([
+  const [canEdit, canRecord, canSeeCost, programmes, events, withdrawal] = await Promise.all([
     currentUserCan('health:edit'),
     currentUserCan('health:create'),
     currentUserCan('finance:view'),
     assignableProgrammes(principal),
     healthEventsFor(principal, flockId),
+    flockWithdrawals(principal, flockId),
   ]);
 
   const due = view.schedule.filter((e) => e.status === 'OVERDUE' || e.status === 'DUE');
@@ -54,6 +57,15 @@ export default async function FlockHealthPage({
         {view.flock.houseName ? `${view.flock.houseName} · ` : ''}day {view.flock.ageDays}
         {view.flock.closed ? ' · closed' : ''}
       </p>
+
+      {withdrawal && withdrawal.withdrawals.length > 0 ? (
+        <WithdrawalBanner
+          className="mt-5"
+          withdrawals={withdrawal.withdrawals}
+          eggsClearOn={withdrawal.eggsClearOn}
+          meatClearsOn={withdrawal.meatClearsOn}
+        />
+      ) : null}
 
       {view.programme ? (
         <>

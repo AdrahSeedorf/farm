@@ -13,6 +13,7 @@ import {
 import { splitIntoContainers, BASE_UNIT, formatQuantity } from '@/lib/uom';
 import { stockOverview } from '@/lib/stock-service';
 import { dueAcrossFlocks } from '@/lib/health-service';
+import { withdrawalsAcrossFlocks } from '@/lib/withdrawal-service';
 import { scheduleSentence } from '@/lib/health-schedule';
 
 export const metadata: Metadata = { title: 'Dashboard' };
@@ -56,6 +57,7 @@ export default async function DashboardPage() {
   ]);
 
   const healthDue = canSeeHealth ? await dueAcrossFlocks(principal) : [];
+  const restricted = canSeeHealth ? await withdrawalsAcrossFlocks(principal) : [];
   const healthOverdue = healthDue.filter((d) => d.entry.status === 'OVERDUE');
 
   // Real figures, off the ledger. Empty for a role with no inventory access.
@@ -173,6 +175,35 @@ export default async function DashboardPage() {
           <KpiTile label="Sales today" value="GHS —" detail="Milestone 15" />
         ) : null}
       </div>
+
+      {restricted.length > 0 ? (
+        <section
+          role="alert"
+          className="mt-10 rounded-card border border-status-critical bg-status-critical-bg p-6"
+        >
+          <h2 className="text-[12px] font-semibold uppercase tracking-[0.16em] text-status-critical">
+            Withdrawal periods in force
+          </h2>
+          <ul className="mt-3 space-y-1.5">
+            {restricted.map((f) => (
+              <li key={f.flockId} className="text-[15px] font-medium text-status-critical">
+                <Link
+                  href={`/flocks/${f.flockId}/health`}
+                  className="underline underline-offset-2"
+                >
+                  {f.houseName ?? f.flockCode}
+                </Link>
+                {f.eggsClearOn
+                  ? ` — no eggs sold until ${f.eggsClearOn.toISOString().slice(0, 10)}`
+                  : ''}
+                {f.meatClearsOn
+                  ? `${f.eggsClearOn ? ';' : ' —'} no birds sold until ${f.meatClearsOn.toISOString().slice(0, 10)}`
+                  : ''}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {healthDue.length > 0 ? (
         <section className="mt-10 rounded-card border border-border-default bg-surface-card p-6">

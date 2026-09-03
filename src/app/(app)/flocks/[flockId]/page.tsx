@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { db } from '@/lib/db';
+import { flockWithdrawals } from '@/lib/withdrawal-service';
+import { WithdrawalBanner } from '../../health/WithdrawalBanner';
 import { pageGuard, currentUserCan } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
 import { orgFilter, canAccessSite } from '@/lib/scope';
@@ -56,6 +58,9 @@ export default async function FlockPage({
   });
 
   const canRecord = await currentUserCan('dailyRecord:create', flock.siteId);
+  const withdrawal = (await currentUserCan('health:view'))
+    ? await flockWithdrawals(principal, flock.id)
+    : null;
   const canEditFlock = await currentUserCan('flock:edit', flock.siteId);
   const today = new Date();
   const lost = totals.placed - totals.population;
@@ -126,6 +131,15 @@ export default async function FlockPage({
           Weights &amp; uniformity
         </Link>
       </div>
+
+      {withdrawal && withdrawal.withdrawals.length > 0 ? (
+        <WithdrawalBanner
+          className="mt-6"
+          withdrawals={withdrawal.withdrawals}
+          eggsClearOn={withdrawal.eggsClearOn}
+          meatClearsOn={withdrawal.meatClearsOn}
+        />
+      ) : null}
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile

@@ -10,6 +10,8 @@ import { reasonCodesFor, reasonLabel } from '@/lib/reason-codes';
 import { CHICK_BEHAVIOURS, LITTER_CONDITIONS, chickBehaviour, litterCondition } from '@/lib/rearing';
 import { uncostedNote } from '@/lib/feed-issue';
 import { flockScheduleFor } from '@/lib/health-service';
+import { flockWithdrawals } from '@/lib/withdrawal-service';
+import { WithdrawalBanner } from '../../health/WithdrawalBanner';
 import { scheduleSentence } from '@/lib/health-schedule';
 import { formatGHS, pesewas } from '@/lib/money';
 import { DailyForm } from '../DailyForm';
@@ -55,6 +57,10 @@ export default async function DailyEntryPage({
   const healthDue =
     healthView?.schedule.filter((e) => e.status === 'DUE' || e.status === 'OVERDUE') ?? [];
 
+  // Shown on the morning screen because that is where someone decides whether
+  // today's eggs go into a crate for sale.
+  const withdrawal = healthView ? await flockWithdrawals(principal, flockId, onDate) : null;
+
   // Already done today — show what was recorded, read-only.
   if (context.existing) {
     const e = context.existing;
@@ -93,6 +99,15 @@ export default async function DailyEntryPage({
             </div>
           ))}
         </dl>
+
+        {withdrawal && withdrawal.withdrawals.length > 0 ? (
+          <WithdrawalBanner
+            className="mt-5"
+            withdrawals={withdrawal.withdrawals}
+            eggsClearOn={withdrawal.eggsClearOn}
+            meatClearsOn={withdrawal.meatClearsOn}
+          />
+        ) : null}
 
         {e.feedIssue ? (
           <div className="mt-5 rounded-card border border-border-default bg-surface-card p-4">
@@ -174,6 +189,15 @@ export default async function DailyEntryPage({
         {onDate.toISOString().slice(0, 10)}
       </p>
 
+
+      {withdrawal && withdrawal.withdrawals.length > 0 ? (
+        <WithdrawalBanner
+          className="mt-5"
+          withdrawals={withdrawal.withdrawals}
+          eggsClearOn={withdrawal.eggsClearOn}
+          meatClearsOn={withdrawal.meatClearsOn}
+        />
+      ) : null}
 
       {healthDue.length > 0 ? (
         <div
