@@ -172,9 +172,14 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ],
 
   // External veterinary user. Health records only, on assigned flocks.
+  //
+  // Holds `health:approve` because signing off a programme is precisely the act
+  // this role exists for. Managers hold it too — in practice a vet emails a
+  // schedule and the manager records the approval in their name, since most
+  // vets attending a Ghanaian farm will never have an account here.
   vet: [
     ...some('flock', ['view']),
-    ...some('health', ['view', 'create', 'edit']),
+    ...some('health', ['view', 'create', 'edit', 'approve']),
     ...some('biosecurity', ['view']),
     ...some('production', ['view']),
     ...some('report', ['view']),

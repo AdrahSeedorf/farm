@@ -663,6 +663,18 @@ model Breed {
 // should be trusted with.
 // ---------------------------------------------------------------------------
 
+/// Whether a programme has been signed off by a named person qualified to do so.
+///
+/// The reason this exists: a farm needs to start recording the day the hatchery
+/// hands over a schedule, which is long before a veterinarian has looked at it.
+/// Blocking entry until then means the first weeks go unrecorded — the weeks
+/// that matter most. So a programme can be used while still DRAFT, and every
+/// screen that shows it says plainly that nobody has reviewed it.
+enum HealthProgrammeStatus {
+  DRAFT
+  APPROVED
+}
+
 enum HealthEventType {
   VACCINATION
   MEDICATION
@@ -717,6 +729,23 @@ model HealthProgramme {
   /// When they supplied or last reviewed it. A programme nobody has looked at
   /// in three years is a fact the farm should be able to see.
   reviewedOn  DateTime? @db.Date
+
+  // --- Approval -----------------------------------------------------------
+  //
+  // Separate from `source`, because the two are genuinely different claims:
+  // "this came from the hatchery" and "a veterinarian has checked it for this
+  // farm" are not the same, and only the second is oversight.
+  //
+  // EDITING AN APPROVED PROGRAMME RETURNS IT TO DRAFT. Without that rule,
+  // someone approves a safe schedule and then edits it into an unsafe one under
+  // the approver's name. Enforced in the service, not left to the caller.
+  status          HealthProgrammeStatus @default(DRAFT)
+  /// The veterinarian who signed it off. Free text: most vets attending a
+  /// Ghanaian farm have no account here, and demanding one would mean the
+  /// approval simply never gets recorded.
+  approvedByName  String?
+  approvedByRole  String?
+  approvedOn      DateTime?             @db.Date
 
   isActive Boolean @default(true)
 
