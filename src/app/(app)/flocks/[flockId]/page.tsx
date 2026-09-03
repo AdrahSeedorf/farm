@@ -62,6 +62,10 @@ export default async function FlockPage({
     ? await flockWithdrawals(principal, flock.id)
     : null;
   const canEditFlock = await currentUserCan('flock:edit', flock.siteId);
+  // A worker holds no finance permission, so the link is simply not drawn for
+  // them — and the page behind it refuses them regardless, since a hidden link
+  // is a courtesy and never a control.
+  const canSeeCosts = await currentUserCan('finance:view', flock.siteId);
   const today = new Date();
   const lost = totals.placed - totals.population;
   const mortalityPct = cumulativeMortalityPct(lost, totals.placed);
@@ -130,6 +134,14 @@ export default async function FlockPage({
         >
           Weights &amp; uniformity
         </Link>
+        {canSeeCosts ? (
+          <Link
+            href={`/flocks/${flock.id}/costs`}
+            className="inline-flex min-h-touch items-center rounded-control border border-border-strong bg-surface-card px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
+          >
+            Costs
+          </Link>
+        ) : null}
       </div>
 
       {withdrawal && withdrawal.withdrawals.length > 0 ? (

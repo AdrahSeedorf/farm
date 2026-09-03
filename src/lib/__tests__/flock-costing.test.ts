@@ -11,6 +11,8 @@ import {
   versusBoughtPullet,
   missingCategories,
   completenessNote,
+  runningTotals,
+  costSpan,
   CATEGORY_LABELS,
   COST_CATEGORIES,
   type CostEntry,
@@ -123,6 +125,60 @@ describe('cost per bird — and why mortality shows up in it', () => {
 
   it('refuses to divide by no days', () => {
     expect(costPerBirdPerDay(total, 940, 0)).toBeNull();
+  });
+});
+
+describe('reading the ledger', () => {
+  it('runs oldest first, so the total counts up', () => {
+    const rows = runningTotals(entries);
+    expect(rows.map((r) => r.entry.incurredOn.toISOString().slice(0, 10))).toEqual([
+      '2026-04-01',
+      '2026-05-10',
+      '2026-06-15',
+      '2026-07-01',
+      '2026-08-20',
+    ]);
+    expect(rows.map((r) => r.runningPesewas)).toEqual([
+      fromCedis(12_000),
+      fromCedis(15_000),
+      fromCedis(43_000),
+      fromCedis(49_000),
+      fromCedis(58_000),
+    ]);
+  });
+
+  it('ends on the same figure as the total', () => {
+    const rows = runningTotals(entries);
+    expect(rows[rows.length - 1].runningPesewas).toBe(totalCost(entries));
+  });
+
+  it('A REVERSAL PULLS THE RUNNING TOTAL BACK DOWN', () => {
+    // Corrections are negative rows, not deletions. Someone checking against
+    // their receipts has to be able to see the mistake and the fix.
+    const withReversal: CostEntry[] = [
+      ...entries,
+      { category: 'LABOUR', amountPesewas: -fromCedis(6_000), incurredOn: d('2026-08-25') },
+    ];
+    const rows = runningTotals(withReversal);
+    expect(rows[rows.length - 1].runningPesewas).toBe(fromCedis(52_000));
+    expect(byCategory(withReversal).find((c) => c.category === 'LABOUR')?.pesewas).toBe(0);
+  });
+
+  it('does not mutate what it was given', () => {
+    const copy = [...entries];
+    runningTotals(entries);
+    expect(entries).toEqual(copy);
+  });
+
+  it('is empty for a flock with no costs', () => {
+    expect(runningTotals([])).toEqual([]);
+    expect(costSpan([])).toBeNull();
+  });
+
+  it('reports the first and last day money went out', () => {
+    const span = costSpan(entries)!;
+    expect(span.first.toISOString().slice(0, 10)).toBe('2026-04-01');
+    expect(span.last.toISOString().slice(0, 10)).toBe('2026-08-20');
   });
 });
 

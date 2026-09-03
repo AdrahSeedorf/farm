@@ -161,6 +161,54 @@ export function costPerBirdPerDay(
 }
 
 // ---------------------------------------------------------------------------
+// THE LEDGER, AS IT READS
+// ---------------------------------------------------------------------------
+
+export interface RunningEntry<T extends CostEntry> {
+  entry: T;
+  /** Everything spent up to and including this row. */
+  runningPesewas: number;
+}
+
+/**
+ * Cost entries in the order they happened, each with the total so far.
+ *
+ * OLDEST FIRST, deliberately, even though most lists in this system are newest
+ * first. A running total that counts DOWN as you read is not a running total,
+ * and the question this table answers — "when did this flock get expensive?" —
+ * is a question about the shape of a line, which only reads forwards.
+ *
+ * Reversals are ordinary rows with negative amounts. They appear in place and
+ * pull the running total back down, which is exactly what a person checking the
+ * figures against their receipts needs to see.
+ */
+export function runningTotals<T extends CostEntry>(entries: T[]): RunningEntry<T>[] {
+  const ordered = [...entries].sort(
+    (a, b) => startOfDay(a.incurredOn) - startOfDay(b.incurredOn),
+  );
+
+  const result: RunningEntry<T>[] = [];
+  let running = 0;
+  for (const entry of ordered) {
+    running += entry.amountPesewas;
+    result.push({ entry, runningPesewas: running });
+  }
+  return result;
+}
+
+/**
+ * The day money first went out, and the day it last did.
+ *
+ * Used to say how long a flock has been accumulating cost, which is what turns
+ * a total into a rate. Null when nothing has been recorded.
+ */
+export function costSpan(entries: CostEntry[]): { first: Date; last: Date } | null {
+  if (entries.length === 0) return null;
+  const times = entries.map((e) => e.incurredOn.getTime());
+  return { first: new Date(Math.min(...times)), last: new Date(Math.max(...times)) };
+}
+
+// ---------------------------------------------------------------------------
 // POINT OF LAY
 // ---------------------------------------------------------------------------
 
