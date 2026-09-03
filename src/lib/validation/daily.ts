@@ -12,7 +12,15 @@ const todayUtc = () => {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 };
 
-const recordDate = z
+/**
+ * A date something was observed on: a real calendar day, never in the future.
+ *
+ * EXPORTED AND SHARED. A second copy of this in another schema is a copy that
+ * eventually allows a future date where this one does not, and an entry dated
+ * next year gives its flock a negative age — which quietly corrupts every
+ * age-driven figure in the system.
+ */
+export const recordDate = z
   .string()
   .trim()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the date picker.')

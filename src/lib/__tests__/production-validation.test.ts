@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { productionGradeSchema, gradeKeyFrom } from '../validation/production';
+import {
+  productionGradeSchema,
+  gradeKeyFrom,
+  collectionSchema,
+  countedToBase,
+  parseGradeLines,
+} from '../validation/production';
 
 /** What the form actually posts: strings, every one of them. */
 const form = (overrides: Record<string, string> = {}) => ({
@@ -80,5 +86,140 @@ describe('the key derived from a name', () => {
 
   it('is empty when a name carries nothing usable, so the caller can refuse it', () => {
     expect(gradeKeyFrom('+++')).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ONE COLLECTION
+// ---------------------------------------------------------------------------
+
+const collectionForm = (overrides: Record<string, string> = {}) => ({
+  onDate: '2026-06-01',
+  counted: '820',
+  unit: 'piece',
+  disposition: 'SALEABLE',
+  dispositionNote: '',
+  notes: '',
+  idempotencyKey: 'a0b1c2d3e4f5',
+  acknowledgedToken: '',
+  ...overrides,
+});
+
+describe('a collection as the form submits it', () => {
+  it('parses the date, the count and the disposition', () => {
+    const parsed = collectionSchema.parse(collectionForm());
+    expect(parsed.counted).toBe(820);
+    expect(parsed.disposition).toBe('SALEABLE');
+    expect(parsed.onDate.toISOString()).toBe('2026-06-01T00:00:00.000Z');
+  });
+
+  it('treats a blank count as NOT COUNTED rather than as none collected', () => {
+    // The trap validation/daily.ts names: `Number("")` is 0, and a collection
+    // nobody counted would otherwise be recorded as a collection of nothing.
+    expect(collectionSchema.parse(collectionForm({ counted: '' })).counted).toBeNull();
+  });
+
+  it('keeps a genuine zero as a zero', () => {
+    expect(collectionSchema.parse(collectionForm({ counted: '0' })).counted).toBe(0);
+  });
+
+  it('refuses a date in the future, whatever the date picker allowed', () => {
+    const nextYear = `${new Date().getUTCFullYear() + 1}-01-01`;
+    expect(collectionSchema.safeParse(collectionForm({ onDate: nextYear })).success).toBe(false);
+  });
+
+  it('refuses a unit that is not something eggs are counted in', () => {
+    expect(collectionSchema.safeParse(collectionForm({ unit: 'kg' })).success).toBe(false);
+  });
+
+  it('refuses a disposition that is not one of the four', () => {
+    expect(collectionSchema.safeParse(collectionForm({ disposition: 'SOLD' })).success).toBe(false);
+  });
+
+  it('needs an idempotency key, because a retrying phone must not double-count', () => {
+    expect(collectionSchema.safeParse(collectionForm({ idempotencyKey: '' })).success).toBe(false);
+  });
+});
+
+describe('the counted figure in whatever unit it was taken in', () => {
+  it('is already in eggs when eggs is what was counted', () => {
+    expect(countedToBase(820, 'piece')).toEqual({ base: 820 });
+  });
+
+  it('turns crates into eggs at thirty, which lives in uom.ts as data', () => {
+    expect(countedToBase(12, 'crate')).toEqual({ base: 360 });
+    expect(countedToBase(30, 'dozen')).toEqual({ base: 360 });
+  });
+
+  it('survives binary floating point on a fractional crate', () => {
+    // 12.1 x 30 evaluates to 363.00000000000006. It is 363 eggs.
+    expect(countedToBase(12.1, 'crate')).toEqual({ base: 363 });
+  });
+
+  it('REFUSES A FRACTION OF AN EGG, and says what to type instead', () => {
+    const result = countedToBase(12.17, 'crate');
+    expect(result.base).toBeNull();
+    expect(result.error).toMatch(/not a whole number/i);
+    expect(result.error).toMatch(/in pieces instead/i);
+  });
+
+  it('is nothing at all when nothing was counted', () => {
+    expect(countedToBase(null, 'crate')).toEqual({ base: null });
+  });
+});
+
+describe('the per-grade boxes', () => {
+  const form = (entries: Record<string, string>) => {
+    const data = new FormData();
+    for (const [k, v] of Object.entries(entries)) data.append(k, v);
+    return data;
+  };
+
+  it('reads only the grades currently offered', () => {
+    const { lines } = parseGradeLines(
+      form({ grade_a: '600', grade_b: '200', grade_retired: '999' }),
+      ['a', 'b'],
+      'piece',
+    );
+    expect(lines).toEqual([
+      { gradeId: 'a', quantityBase: 600, entered: 600 },
+      { gradeId: 'b', quantityBase: 200, entered: 200 },
+    ]);
+  });
+
+  it('IGNORES A GRADE NOBODY WAS OFFERED, rather than trusting the post', () => {
+    const { lines } = parseGradeLines(
+      form({ grade_from_another_farm: '5000' }),
+      ['a'],
+      'piece',
+    );
+    expect(lines).toEqual([]);
+  });
+
+  it('converts every box with the one unit the form was filled in', () => {
+    const { lines } = parseGradeLines(form({ grade_a: '20', grade_b: '4' }), ['a', 'b'], 'crate');
+    expect(lines.map((l) => l.quantityBase)).toEqual([600, 120]);
+    // What was typed is kept as typed, so "20 crates" stays legible as 20.
+    expect(lines.map((l) => l.entered)).toEqual([20, 4]);
+  });
+
+  it('leaves out a blank box and a zero, which record nothing', () => {
+    const { lines } = parseGradeLines(
+      form({ grade_a: '', grade_b: '0', grade_c: '15' }),
+      ['a', 'b', 'c'],
+      'piece',
+    );
+    expect(lines).toEqual([{ gradeId: 'c', quantityBase: 15, entered: 15 }]);
+  });
+
+  it('names the field when a figure cannot be a whole number of eggs', () => {
+    const { lines, fieldErrors } = parseGradeLines(form({ grade_a: '1.1' }), ['a'], 'dozen');
+    expect(lines).toEqual([]);
+    expect(fieldErrors.grade_a).toMatch(/13.2 — not a whole number/);
+  });
+
+  it('names the field when a figure is not a number at all', () => {
+    const { fieldErrors } = parseGradeLines(form({ grade_a: 'plenty' }), ['a'], 'piece');
+    expect(fieldErrors.grade_a).toMatch(/Enter a number/i);
   });
 });
