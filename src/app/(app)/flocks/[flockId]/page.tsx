@@ -128,7 +128,7 @@ export default async function FlockPage({
         </div>
         {canRecordProduction ? (
           <Link
-            href={`/production/${flock.id}`}
+            href={`/flocks/${flock.id}/production`}
             className="inline-flex min-h-touch items-center rounded-control border border-border-strong bg-surface-card px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
           >
             {words.production}

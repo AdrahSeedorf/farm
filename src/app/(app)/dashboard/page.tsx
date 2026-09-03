@@ -4,16 +4,13 @@ import { KpiTile, metric } from '@/components/ui/KpiTile';
 import { pageGuard, currentUserCan } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
 import { permissionsFor } from '@/lib/rbac';
-import {
-  dailyMortalityPct,
-  henDayProductionPct,
-  saleableRatePct,
-  round,
-} from '@/lib/metrics';
+import { dailyMortalityPct, round } from '@/lib/metrics';
 import { splitIntoContainers, BASE_UNIT, formatQuantity } from '@/lib/uom';
 import { stockOverview } from '@/lib/stock-service';
 import { dueAcrossFlocks } from '@/lib/health-service';
 import { withdrawalsAcrossFlocks } from '@/lib/withdrawal-service';
+import { productionToday } from '@/lib/production-service';
+import { lower } from '@/lib/terminology';
 import { scheduleSentence } from '@/lib/health-schedule';
 
 export const metadata: Metadata = { title: 'Dashboard' };
@@ -29,19 +26,18 @@ export const metadata: Metadata = { title: 'Dashboard' };
  */
 
 /**
- * SAMPLE PRODUCTION FIGURES, clearly labelled as such on screen.
+ * SAMPLE FIGURES, clearly labelled as such on screen.
  *
- * The stock tiles below are now real — they read the ledger. These are not, and
- * showing a fabricated number next to a real one without saying which is which
- * is how someone ends up ordering feed against an invented figure. They are
- * replaced by real flock data at the reporting milestone.
+ * The stock, health and production tiles are now real — they read their
+ * ledgers. THESE ARE NOT. Showing a fabricated number beside a real one without
+ * saying which is which is how somebody ends up ordering feed against an
+ * invented figure, so what remains sample says so on the page. Population and
+ * mortality become real at the reporting milestone.
  */
 const SAMPLE = {
   openingPopulation: 1950,
   closingPopulation: 1946,
   deathsToday: 4,
-  eggsCollected: 1712,
-  saleableEggs: 1681,
 };
 
 export default async function DashboardPage() {
@@ -72,20 +68,23 @@ export default async function DashboardPage() {
   const expiring = stock.filter((s) => s.expired.length === 0 && s.expiringSoon.length > 0);
 
   const mortality = dailyMortalityPct(SAMPLE.deathsToday, SAMPLE.openingPopulation);
-  const henDay = henDayProductionPct(
-    SAMPLE.eggsCollected,
-    SAMPLE.openingPopulation,
-    SAMPLE.closingPopulation,
+
+  // Real, off the production records. Site-scoped inside the query, so a
+  // supervisor covering one farm sees one farm's figure.
+  const now = new Date();
+  const production = await productionToday(
+    principal,
+    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())),
   );
-  const saleable = saleableRatePct(SAMPLE.saleableEggs, SAMPLE.eggsCollected);
-  const crates = splitIntoContainers(SAMPLE.eggsCollected, 'crate');
+  const crates = splitIntoContainers(production.total, 'crate');
 
   return (
     <main className="mx-auto max-w-6xl px-5 py-8">
       <h1 className="text-2xl font-bold text-text-primary">Today</h1>
       <p className="mt-1 text-[15px] text-text-secondary">
-        Normal is uncoloured — colour marks the exceptions only. Stock figures are live;
-        the production figures are still sample data until the reporting milestone.
+        Normal is uncoloured — colour marks the exceptions only. Stock, health and
+        production figures are live; the bird count and mortality are still sample data
+        until the reporting milestone.
       </p>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -101,20 +100,34 @@ export default async function DashboardPage() {
           formula="deaths ÷ opening population"
         />
         <KpiTile
-          label="Eggs collected"
-          value={metric(SAMPLE.eggsCollected)}
-          detail={`${crates.containers} crates + ${crates.remainder}`}
+          label={`${production.words.production} collected`}
+          value={metric(production.total)}
+          detail={
+            production.total === 0
+              ? production.laying === 0
+                ? 'No house is laying yet'
+                : `Nothing collected from ${production.laying} laying ${
+                    production.laying === 1 ? 'house' : 'houses'
+                  } yet`
+              : `${crates.containers} crates${crates.remainder > 0 ? ` + ${crates.remainder}` : ''} · ${production.collectedFrom} of ${production.laying} houses`
+          }
+          formula="every collection recorded today, corrections included"
         />
         <KpiTile
           label="Hen-day production"
-          value={metric(round(henDay), { decimals: 1, suffix: '%' })}
+          value={metric(round(production.henDayPct), { decimals: 1, suffix: '%' })}
           detail="share of birds present that laid"
-          formula="eggs ÷ average birds alive"
+          formula={`${lower(production.words.production)} today ÷ birds in laying houses`}
         />
         <KpiTile
           label="Saleable"
-          value={metric(round(saleable), { decimals: 1, suffix: '%' })}
-          detail={`${metric(SAMPLE.saleableEggs)} of ${metric(SAMPLE.eggsCollected)}`}
+          value={metric(round(production.saleableRatePct), { decimals: 1, suffix: '%' })}
+          detail={
+            production.gradedTotal === 0
+              ? 'Nothing graded today'
+              : `${metric(production.gradedTotal)} graded`
+          }
+          formula="saleable grades ÷ everything graded × 100"
         />
         {canSeeStock ? (
           <KpiTile

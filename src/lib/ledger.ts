@@ -142,6 +142,58 @@ export function dayPopulation(
   return { opening, closing, deaths, sold };
 }
 
+export interface DayPopulation {
+  onDate: Date;
+  opening: number;
+  closing: number;
+}
+
+/**
+ * Opening and closing population for a run of days, in one pass.
+ *
+ * `dayPopulation` answers the same question for a single day by walking every
+ * event. Asking it five hundred times — which is what a laying cycle's
+ * production curve needs — walks the ledger five hundred times over. This walks
+ * it once, carrying the running total forward from day to day.
+ *
+ * The two agree by construction: both are the signed sum of the ledger up to a
+ * cut-off, which is the only definition of population this system has.
+ *
+ * Days are supplied by the caller rather than generated here, because the caller
+ * knows which days it is interested in — and a flock with a gap in its records
+ * still has a population on the days nobody wrote anything down.
+ */
+export function populationSeries(events: PopulationEvent[], dates: Date[]): DayPopulation[] {
+  const sorted = [...events].sort((a, b) => a.occurredOn.getTime() - b.occurredOn.getTime());
+  const ordered = [...dates].sort((a, b) => a.getTime() - b.getTime());
+
+  const result: DayPopulation[] = [];
+  let running = 0;
+  let next = 0;
+
+  for (const onDate of ordered) {
+    const dayStart = startOfDay(onDate);
+    const dayEnd = endOfDay(onDate);
+
+    // Everything that happened before this day.
+    while (next < sorted.length && sorted[next].occurredOn.getTime() < dayStart) {
+      running += sorted[next].delta;
+      next += 1;
+    }
+    const opening = running;
+
+    // Everything that happened during it.
+    while (next < sorted.length && sorted[next].occurredOn.getTime() <= dayEnd) {
+      running += sorted[next].delta;
+      next += 1;
+    }
+
+    result.push({ onDate, opening, closing: running });
+  }
+
+  return result;
+}
+
 /**
  * Total deaths (mortality + culls) between two dates inclusive.
  * Culls are counted here because a bird culled is a bird gone; the two are

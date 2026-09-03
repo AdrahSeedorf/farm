@@ -1,8 +1,8 @@
 import 'server-only';
 import { db } from '@/lib/db';
 import type { Principal } from '@/lib/rbac';
-import { orgFilter } from '@/lib/scope';
-import { ageInDays } from '@/lib/metrics';
+import { orgFilter, siteFilter } from '@/lib/scope';
+import { ageInDays, henDayProductionPct } from '@/lib/metrics';
 import { warningToken, type Warning } from '@/lib/warnings';
 import { terminologyFrom, type Terminology } from '@/lib/terminology';
 import {
@@ -14,11 +14,17 @@ import {
 import {
   collectionTotal,
   layStandardFrom,
+  missingDays,
+  saleableRate,
   standardHenDayAt,
   totalOf,
+  type DayOfLay,
   type Grade,
+  type LayStandard,
   type OutputLine,
 } from '@/lib/production';
+import { populationSeries, type PopulationEvent } from '@/lib/ledger';
+import { populationsFor } from '@/lib/flock-service';
 import { assertSaleAllowed, flockWithdrawals, WithdrawalError } from '@/lib/withdrawal-service';
 import type { CollectionInput, ParsedGradeLine } from '@/lib/validation/production';
 
@@ -560,4 +566,269 @@ function isSequenceCollision(error: unknown): boolean {
   const target = (error as { meta?: { target?: unknown } }).meta?.target;
   const fields = Array.isArray(target) ? target.map(String) : [String(target ?? '')];
   return fields.some((f) => f.includes('sequence'));
+}
+
+// ---------------------------------------------------------------------------
+// THE HISTORY
+// ---------------------------------------------------------------------------
+
+export interface ProductionHistory {
+  flockId: string;
+  code: string;
+  houseName: string | null;
+  siteId: string;
+  words: Terminology;
+  breedName: string | null;
+  dateOfHatch: Date;
+  /** Birds placed, from the ledger — the denominator of hen-housed production. */
+  placed: number;
+  population: number;
+  ageDays: number;
+  /** One row per day that has a record, oldest first. */
+  days: DayOfLay[];
+  /** Days between the first and last record with nothing written down. */
+  missing: Date[];
+  /** Every graded line over the whole period. */
+  lines: OutputLine[];
+  grades: (Grade & { id: string })[];
+  /** The breed's published curve, empty when none has been loaded. */
+  standard: LayStandard;
+}
+
+/**
+ * Everything a flock has produced, as far back as the records go.
+ *
+ * FOUR QUERIES, NOT ONE PER DAY. The records, their graded lines, the population
+ * ledger and the flock itself are each read once, and the arithmetic happens in
+ * `production.ts` where it can be tested. A screen that walked the ledger once
+ * per day would be doing five hundred round trips to draw one curve.
+ */
+export async function productionHistoryFor(
+  principal: Principal,
+  flockId: string,
+): Promise<ProductionHistory | null> {
+  const flock = await db.animalGroup.findFirst({
+    where: { id: flockId, site: orgFilter(principal) },
+    include: {
+      productionUnit: { select: { name: true } },
+      breedRef: { select: { name: true, standards: true } },
+      speciesProfile: { select: { terminology: true } },
+      productionType: {
+        select: {
+          productionGrades: { orderBy: { sortOrder: 'asc' } },
+        },
+      },
+    },
+  });
+  if (!flock) return null;
+
+  const [records, events] = await Promise.all([
+    db.productionRecord.findMany({
+      where: { animalGroupId: flockId },
+      orderBy: [{ onDate: 'asc' }, { sequence: 'asc' }],
+      select: {
+        id: true,
+        onDate: true,
+        sequence: true,
+        countedBase: true,
+        lines: { select: { productionGradeId: true, quantityBase: true } },
+      },
+    }),
+    db.animalGroupEvent.findMany({
+      where: { animalGroupId: flockId },
+      select: { type: true, delta: true, occurredOn: true },
+    }),
+  ]);
+
+  // Every graded line, whatever day it came from — the period's grade split.
+  const lines: OutputLine[] = records.flatMap((record) =>
+    record.lines.map((line) => ({
+      gradeKey: line.productionGradeId,
+      quantity: line.quantityBase,
+    })),
+  );
+
+  // One entry per day that has any record at all, netting corrections.
+  const byDay = new Map<number, number>();
+  for (const record of records) {
+    const key = record.onDate.getTime();
+    byDay.set(
+      key,
+      (byDay.get(key) ?? 0) +
+        collectionTotal({
+          sequence: record.sequence,
+          countedQuantity: record.countedBase,
+          lines: record.lines.map((l) => ({
+            gradeKey: l.productionGradeId,
+            quantity: l.quantityBase,
+          })),
+        }),
+    );
+  }
+
+  const dates = [...byDay.keys()].sort((a, b) => a - b).map((t) => new Date(t));
+  const populations = populationSeries(
+    events.map((e) => ({
+      type: e.type as PopulationEvent['type'],
+      delta: e.delta,
+      occurredOn: e.occurredOn,
+    })),
+    dates,
+  );
+
+  const days: DayOfLay[] = populations.map((day) => ({
+    onDate: day.onDate,
+    ageDays: ageInDays(flock.dateOfHatch, day.onDate),
+    eggs: byDay.get(day.onDate.getTime()) ?? 0,
+    openingBirds: day.opening,
+    closingBirds: day.closing,
+  }));
+
+  const placed = events
+    .filter((e) => e.type === 'PLACEMENT')
+    .reduce((sum, e) => sum + e.delta, 0);
+
+  const today = new Date();
+
+  return {
+    flockId: flock.id,
+    code: flock.code,
+    houseName: flock.productionUnit?.name ?? null,
+    siteId: flock.siteId,
+    words: terminologyFrom(flock.speciesProfile.terminology),
+    breedName: flock.breedRef?.name ?? null,
+    dateOfHatch: flock.dateOfHatch,
+    placed,
+    population: events.reduce((sum, e) => sum + e.delta, 0),
+    ageDays: ageInDays(flock.dateOfHatch, today),
+    days,
+    missing:
+      dates.length === 0 ? [] : missingDays(dates, dates[0], dates[dates.length - 1]),
+    lines,
+    // KEYED BY ID, not by the grade's own key. The lines above carry grade ids,
+    // because that is what a production line stores, and `gradeTotals` matches
+    // the two on `key`. Deliberate, and the pair must stay consistent — a grade
+    // whose key stopped matching would show as an unnamed row rather than
+    // silently dropping its eggs out of the total.
+    grades: flock.productionType.productionGrades.map((g) => ({
+      id: g.id,
+      key: g.id,
+      name: g.name,
+      isSaleable: g.isSaleable,
+      sortOrder: g.sortOrder,
+    })),
+    standard: layStandardFrom(flock.breedRef?.standards),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// ACROSS THE FARM
+// ---------------------------------------------------------------------------
+
+export interface ProductionToday {
+  /** Everything collected today, across every flock this principal can see. */
+  total: number;
+  /** Hen-day across those flocks, or null when there are no birds to divide by. */
+  henDayPct: number | null;
+  saleableRatePct: number | null;
+  gradedTotal: number;
+  /** Houses with at least one collection today. */
+  collectedFrom: number;
+  /** Houses whose stage says they are producing. */
+  laying: number;
+  words: Terminology;
+}
+
+/**
+ * Today's production for the whole farm, for the owner's dashboard.
+ *
+ * SITE-SCOPED IN THE QUERY. A supervisor covering one farm sees one farm's
+ * eggs — not a total that quietly includes a site they cannot open.
+ *
+ * Hen-day uses the population standing now for both ends of the day, because the
+ * day is not over. It is the same figure the collection screen shows, and it is
+ * labelled as today's rather than as the flock's.
+ */
+export async function productionToday(
+  principal: Principal,
+  onDate: Date,
+): Promise<ProductionToday> {
+  const flocks = await db.animalGroup.findMany({
+    where: { closedAt: null, site: orgFilter(principal), ...siteFilter(principal) },
+    select: {
+      id: true,
+      currentStage: { select: { isProductionStart: true } },
+      speciesProfile: { select: { terminology: true } },
+      productionRecords: {
+        where: { onDate },
+        select: {
+          sequence: true,
+          countedBase: true,
+          lines: { select: { productionGradeId: true, quantityBase: true } },
+        },
+      },
+    },
+  });
+
+  const flockIds = flocks.map((f) => f.id);
+  const [populations, gradeRows] = await Promise.all([
+    populationsFor(flockIds),
+    db.productionGrade.findMany({
+      where: { productionType: { speciesProfile: { organisationId: principal.organisationId } } },
+      select: { id: true, name: true, isSaleable: true, sortOrder: true },
+    }),
+  ]);
+
+  const grades: (Grade & { id: string })[] = gradeRows.map((g) => ({
+    id: g.id,
+    key: g.id,
+    name: g.name,
+    isSaleable: g.isSaleable,
+    sortOrder: g.sortOrder,
+  }));
+
+  let total = 0;
+  let birds = 0;
+  let collectedFrom = 0;
+  let laying = 0;
+  const lines: OutputLine[] = [];
+
+  for (const flock of flocks) {
+    if (flock.currentStage?.isProductionStart) laying += 1;
+    if (flock.productionRecords.length > 0) collectedFrom += 1;
+
+    for (const record of flock.productionRecords) {
+      total += collectionTotal({
+        sequence: record.sequence,
+        countedQuantity: record.countedBase,
+        lines: record.lines.map((l) => ({
+          gradeKey: l.productionGradeId,
+          quantity: l.quantityBase,
+        })),
+      });
+      lines.push(
+        ...record.lines.map((l) => ({
+          gradeKey: l.productionGradeId,
+          quantity: l.quantityBase,
+        })),
+      );
+    }
+
+    // Only flocks that are actually producing belong in the denominator. Adding
+    // a house of eight-week pullets would report the farm as laying at half the
+    // rate it really is, which is a figure nobody could act on.
+    if (flock.currentStage?.isProductionStart) birds += populations.get(flock.id) ?? 0;
+  }
+
+  const gradedTotal = totalOf(lines);
+
+  return {
+    total,
+    henDayPct: henDayProductionPct(total, birds, birds),
+    saleableRatePct: saleableRate(lines, grades),
+    gradedTotal,
+    collectedFrom,
+    laying,
+    words: terminologyFrom(flocks[0]?.speciesProfile.terminology ?? null),
+  };
 }
