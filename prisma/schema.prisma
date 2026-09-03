@@ -109,6 +109,7 @@ model ProductionUnit {
   site         Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
   animalGroups AnimalGroup[]
   dailyRecords DailyRecord[]
+  productionRecords ProductionRecord[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -165,6 +166,7 @@ model ProductionTypeProfile {
   animalGroups   AnimalGroup[]
   healthProgrammes HealthProgramme[]
   breeds         Breed[]
+  productionGrades ProductionGrade[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -259,6 +261,7 @@ model AnimalGroup {
   costEntries   FlockCostEntry[]
   dailyRecords  DailyRecord[]
   healthEvents  HealthEvent[]
+  productionRecords ProductionRecord[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -534,6 +537,183 @@ model DailyRecord {
 }
 
 // ---------------------------------------------------------------------------
+// PRODUCTION
+//
+// What comes out of a group — eggs, milk, weaned piglets, harvested fish.
+//
+// NOTHING HERE IS NAMED "EGG". A grade is a row the farm edits, not a value in
+// an enum a developer chose, so "Large" and "Cracked" are configuration in
+// exactly the way "Flock" and "House" are. The same three tables count litres of
+// milk; only the grade rows change.
+//
+// A DAY IS SEVERAL COLLECTIONS, NOT ONE EDITABLE TOTAL. Eggs are gathered two or
+// three times a day, by whoever walked the house. Each walk is its own row and
+// the day's figure is their sum. A single total per day would mean the second
+// collection overwrites the first — the one thing this architecture never allows.
+// ---------------------------------------------------------------------------
+
+/// A quality or size band the farm sorts its output into.
+///
+/// HUNG OFF THE PRODUCTION TYPE, not the organisation — the same choice as
+/// LifecycleStage. A farm running layers and broilers grades eggs and grades
+/// carcasses, and the two lists have nothing to do with each other.
+///
+/// THE WEIGHT BANDS ARE NOT SHIPPED. Egg size bands vary between buyers and
+/// between countries, and a band baked into software would be trusted: eggs
+/// would be sorted to a boundary nobody on the farm chose and no customer
+/// agreed. They are seeded blank and the farm sets them, exactly like breed
+/// weight curves.
+model ProductionGrade {
+  id                      String @id @default(cuid())
+  productionTypeProfileId String
+
+  /// Stable key used in imports and exports, e.g. "large", "cracked".
+  key  String
+  name String
+
+  /// Whether the farm can sell it. Cracked, dirty and floor-laid eggs cannot.
+  ///
+  /// The flag the saleable rate is computed from, and — once orders exist — the
+  /// flag that decides what may be put on an invoice at all.
+  isSaleable Boolean @default(true)
+
+  /// The farm's own grading boundary, in GRAMS. Null means nobody has set one,
+  /// which is not the same as "no boundary applies".
+  minGrams Int?
+  maxGrams Int?
+
+  /// The base unit this grade is counted in — `piece` for eggs, `litre` for
+  /// milk. Held so the unit layer can refuse a cross-dimension entry rather than
+  /// silently accepting kilograms of eggs.
+  baseUomId String
+
+  /// Fixed display order. Grades read in the same places every day, so a change
+  /// in the shape of a collection is visible at a glance.
+  sortOrder Int     @default(0)
+  /// RETIRED, NEVER DELETED. Production lines point at grades; deleting one
+  /// would either destroy history or leave rows nobody can name.
+  isActive  Boolean @default(true)
+
+  productionType ProductionTypeProfile @relation(fields: [productionTypeProfileId], references: [id], onDelete: Cascade)
+  baseUom        UnitOfMeasure         @relation(fields: [baseUomId], references: [id])
+  lines          ProductionLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productionTypeProfileId, key])
+  @@index([productionTypeProfileId, sortOrder])
+}
+
+/// What happens to what was collected.
+///
+/// THE FOOD-SAFETY SWITCH. Only SALEABLE output may ever reach a customer, and
+/// a flock inside a withdrawal period cannot be recorded as SALEABLE — see
+/// `assertSaleAllowed` in src/lib/withdrawal-service.ts.
+///
+/// A SHORT LIST ON PURPOSE. Adding a value is a migration, which is the right
+/// amount of friction for a vocabulary that decides what goes into food.
+enum ProductionDisposition {
+  /// Fit for sale. The default, and the only one that becomes saleable stock.
+  SALEABLE
+  /// Kept back — under a withdrawal period, or awaiting a decision.
+  HELD
+  /// Destroyed.
+  DISCARDED
+  /// Eaten on the farm, or given to staff.
+  HOME_USE
+}
+
+/// ONE COLLECTION from one group. Append-only.
+model ProductionRecord {
+  id               String  @id @default(cuid())
+  animalGroupId    String
+  /// Where it was collected from. Nullable because a group need not be assigned
+  /// to a unit — and a collection that really happened must still be recordable.
+  productionUnitId String?
+
+  onDate   DateTime @db.Date
+  /// Which collection of that day this was: 1, 2, 3.
+  sequence Int
+
+  /// Age of the group on the day, stamped at write time — the same rule as
+  /// HealthEvent, so a corrected date of hatch cannot rewrite what was recorded.
+  ageDays  Int
+
+  /// What was counted in the house, before anything was graded, in the base unit.
+  ///
+  /// Null when the farm grades as it collects and there is only one figure. When
+  /// there are two they are BOTH kept: eggs break between the house and the
+  /// grading bench, and the difference between the counts is a measurement of
+  /// that, not a discrepancy to be resolved away.
+  countedBase    Float?
+  /// What was actually typed, and in which unit. "12 crates" stays legible as
+  /// "12 crates" rather than becoming 360.
+  countedEntered Float?
+  countedUomId   String?
+
+  disposition     ProductionDisposition @default(SALEABLE)
+  /// Why it was not sold, when it was not.
+  dispositionNote String?
+
+  /// Client-generated, the defence against a phone retrying over a bad
+  /// connection. Unique: the second attempt is rejected, never merged.
+  idempotencyKey String @unique
+
+  /// Plausibility warnings shown and accepted at entry, as on DailyRecord.
+  warnings Json?
+  notes    String?
+
+  /// The record this one corrects, carrying the NEGATIVE of its lines.
+  ///
+  /// A miscounted collection is fixed the way everything else in this system is
+  /// fixed — with a new row that reverses the old one, followed by a fresh
+  /// record holding the right figures. Both stay visible, in the order they
+  /// happened. UNIQUE, so the database itself refuses to correct the same
+  /// collection twice.
+  correctsId String? @unique
+
+  recordedById String
+
+  animalGroup    AnimalGroup       @relation(fields: [animalGroupId], references: [id], onDelete: Cascade)
+  productionUnit ProductionUnit?   @relation(fields: [productionUnitId], references: [id])
+  countedUom     UnitOfMeasure?    @relation(fields: [countedUomId], references: [id])
+  corrects       ProductionRecord? @relation("ProductionCorrection", fields: [correctsId], references: [id])
+  correctedBy    ProductionRecord? @relation("ProductionCorrection")
+  recordedBy     User              @relation(fields: [recordedById], references: [id])
+  lines          ProductionLine[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([animalGroupId, onDate, sequence])
+  @@index([animalGroupId, onDate])
+  @@index([productionUnitId, onDate])
+}
+
+/// One grade's share of one collection.
+model ProductionLine {
+  id                 String @id @default(cuid())
+  productionRecordId String
+  productionGradeId  String
+
+  /// SIGNED quantity in the grade's base unit. Negative only on a correction,
+  /// which carries the negative of every line it reverses.
+  quantityBase    Float
+  /// What was typed and in which unit, kept for audit and display.
+  enteredQuantity Float
+  enteredUomId    String
+
+  record  ProductionRecord @relation(fields: [productionRecordId], references: [id], onDelete: Cascade)
+  grade   ProductionGrade  @relation(fields: [productionGradeId], references: [id])
+  enteredUom UnitOfMeasure @relation("ProductionLineUom", fields: [enteredUomId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([productionRecordId, productionGradeId])
+  @@index([productionGradeId])
+}
+
+// ---------------------------------------------------------------------------
 // UNITS OF MEASURE
 // Prevents the classic disaster where "180" means bags to one person and
 // kilograms to another.
@@ -560,6 +740,9 @@ model UnitOfMeasure {
 
   items          Item[]
   stockMovements StockMovement[]
+  productionGrades  ProductionGrade[]
+  productionLines   ProductionLine[]   @relation("ProductionLineUom")
+  productionRecords ProductionRecord[]
 
   @@index([dimension])
 }
@@ -1006,6 +1189,7 @@ model User {
   verifiedRecords    DailyRecord[]      @relation("DailyRecordVerifier")
   healthEvents       HealthEvent[]
   costAllocations    CostAllocation[]
+  productionRecords  ProductionRecord[]
   auditLogs          AuditLog[]
 
   createdAt DateTime @default(now())

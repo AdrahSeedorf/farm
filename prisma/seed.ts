@@ -278,6 +278,54 @@ async function main() {
   }
   console.log(`  \u2713 ${layerBreeds.length} layer breeds (names only, no weight figures)`);
 
+  // --- Egg grades -----------------------------------------------------------
+  //
+  // NAMES ONLY, EXACTLY AS WITH BREEDS. These are the bands eggs are sold in
+  // around Ashanti, seeded so the collection screen offers a list rather than a
+  // free-text box \u2014 "large", "Large" and "L" would otherwise be three grades in
+  // every later report.
+  //
+  // NO WEIGHT BOUNDARIES ARE SEEDED. Egg size bands differ between buyers, and a
+  // boundary baked into software would be trusted: eggs would be sorted to a
+  // line nobody on this farm chose and no customer agreed to. The farm sets them
+  // in Settings, and until it does the grades are simply names people apply by
+  // eye, which is what happens on the bench anyway.
+  //
+  // "Pullet" is the small first egg a young flock lays \u2014 a real and saleable
+  // grade, not a defect. "Dirty" is seeded as NOT saleable because washing an
+  // egg removes the cuticle and shortens its life; a farm that cleans and sells
+  // them changes the flag, and the decision is then recorded rather than assumed.
+  const eggGrades = [
+    ['pullet', 'Pullet', true],
+    ['small', 'Small', true],
+    ['medium', 'Medium', true],
+    ['large', 'Large', true],
+    ['extra_large', 'Extra large', true],
+    ['cracked', 'Cracked', false],
+    ['dirty', 'Dirty', false],
+    ['floor', 'Floor egg', false],
+  ] as const;
+
+  const piece = await db.unitOfMeasure.findUniqueOrThrow({ where: { key: 'piece' } });
+
+  for (const [index, [key, name, isSaleable]] of eggGrades.entries()) {
+    await db.productionGrade.upsert({
+      where: { productionTypeProfileId_key: { productionTypeProfileId: layer.id, key } },
+      // Name and order are kept current; `isSaleable` and the weight bands are
+      // NOT overwritten, because a farm that has changed them meant to.
+      update: { name, sortOrder: index + 1 },
+      create: {
+        productionTypeProfileId: layer.id,
+        key,
+        name,
+        isSaleable,
+        baseUomId: piece.id,
+        sortOrder: index + 1,
+      },
+    });
+  }
+  console.log(`  \u2713 ${eggGrades.length} egg grades (names only, no weight bands)`);
+
   // --- First owner account -------------------------------------------------
   //
   // Created only if no user exists, so re-seeding never resets your password.

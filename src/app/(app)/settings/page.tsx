@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { db } from '@/lib/db';
 import { pageGuard, currentUserCan } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
@@ -22,6 +23,13 @@ export default async function SettingsPage() {
   const breeds = await db.breed.findMany({
     where: { organisationId: principal.organisationId, isActive: true },
     orderBy: { name: 'asc' },
+  });
+
+  const gradeCount = await db.productionGrade.count({
+    where: {
+      isActive: true,
+      productionType: { speciesProfile: { organisationId: principal.organisationId } },
+    },
   });
 
   const recentAudit = (await currentUserCan('audit:view'))
@@ -143,6 +151,23 @@ export default async function SettingsPage() {
             <BreedForm />
           </div>
         ) : null}
+      </section>
+
+      <section className="mt-6 rounded-card border border-border-default bg-surface-card p-6">
+        <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-brand-accent">
+          Grades
+        </h2>
+        <p className="mt-3 text-[14px] text-text-secondary">
+          The bands a collection is sorted into, and which of them count as saleable. Seeded
+          with names only — the weight boundaries are yours to agree with your buyer, not the
+          software&rsquo;s to assume.
+        </p>
+        <Link
+          href="/settings/grades"
+          className="mt-4 inline-flex min-h-touch items-center rounded-control border border-border-strong bg-surface-card px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
+        >
+          {gradeCount} grade{gradeCount === 1 ? '' : 's'} set up
+        </Link>
       </section>
 
       {recentAudit.length > 0 ? (
