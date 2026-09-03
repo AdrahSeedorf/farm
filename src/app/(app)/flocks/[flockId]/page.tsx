@@ -11,6 +11,7 @@ import { totalsFor } from '@/lib/flock-service';
 import { REASON_CODES, reasonLabel, EVENT_LABELS } from '@/lib/reason-codes';
 import { ageInDays, ageInWeeks, cumulativeMortalityPct, round } from '@/lib/metrics';
 import { stageDrift } from '@/lib/rearing';
+import { terminologyFrom } from '@/lib/terminology';
 import { KpiTile, metric } from '@/components/ui/KpiTile';
 import { EventForm } from '../EventForm';
 import { StageCard } from '../StageCard';
@@ -32,6 +33,7 @@ export default async function FlockPage({
     include: {
       site: { select: { id: true, name: true } },
       productionUnit: { select: { name: true, code: true } },
+      speciesProfile: { select: { terminology: true } },
       currentStage: { select: { name: true } },
       breedRef: { select: { name: true } },
       productionType: {
@@ -66,6 +68,8 @@ export default async function FlockPage({
   // them — and the page behind it refuses them regardless, since a hidden link
   // is a courtesy and never a control.
   const canSeeCosts = await currentUserCan('finance:view', flock.siteId);
+  const canRecordProduction = await currentUserCan('production:view', flock.siteId);
+  const words = terminologyFrom(flock.speciesProfile.terminology);
   const today = new Date();
   const lost = totals.placed - totals.population;
   const mortalityPct = cumulativeMortalityPct(lost, totals.placed);
@@ -122,6 +126,14 @@ export default async function FlockPage({
               .join(' · ')}
           </p>
         </div>
+        {canRecordProduction ? (
+          <Link
+            href={`/production/${flock.id}`}
+            className="inline-flex min-h-touch items-center rounded-control border border-border-strong bg-surface-card px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
+          >
+            {words.production}
+          </Link>
+        ) : null}
         <Link
           href={`/flocks/${flock.id}/health`}
           className="inline-flex min-h-touch items-center rounded-control border border-border-strong bg-surface-card px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"

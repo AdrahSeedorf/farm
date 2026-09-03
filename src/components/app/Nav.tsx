@@ -1,5 +1,7 @@
 import Link from 'next/link';
-import { currentUserCan } from '@/lib/session';
+import { db } from '@/lib/db';
+import { currentUserCan, requirePrincipal } from '@/lib/session';
+import { terminologyFrom } from '@/lib/terminology';
 import type { Permission } from '@/lib/rbac';
 
 /**
@@ -13,6 +15,8 @@ const ITEMS: { href: string; label: string; permission: Permission }[] = [
   { href: '/daily', label: 'Today', permission: 'dailyRecord:view' },
   { href: '/dashboard', label: 'Dashboard', permission: 'report:view' },
   { href: '/flocks', label: 'Flocks', permission: 'flock:view' },
+  // Labelled from the species profile below, not from this string. See productionLabel().
+  { href: '/production', label: 'Production', permission: 'production:view' },
   { href: '/health', label: 'Health', permission: 'health:view' },
   { href: '/inventory', label: 'Store', permission: 'inventory:view' },
   { href: '/costs', label: 'Costs', permission: 'finance:view' },
@@ -20,11 +24,37 @@ const ITEMS: { href: string; label: string; permission: Permission }[] = [
   { href: '/settings', label: 'Settings', permission: 'settings:view' },
 ];
 
+/**
+ * What this farm calls its produce — "Eggs" here, "Milk" on a dairy.
+ *
+ * Resolved from the species profile rather than typed into the list above,
+ * because a navigation label is the most-read text in the whole application and
+ * hard-coding "Eggs" there would put a poultry word at the top of every screen.
+ *
+ * A farm running more than one species gets the neutral word: with two profiles
+ * there is no single right answer, and "Production" is honest where "Eggs" would
+ * be wrong half the time.
+ */
+async function productionLabel(organisationId: string): Promise<string> {
+  const profiles = await db.speciesProfile.findMany({
+    where: { organisationId, isActive: true },
+    select: { terminology: true },
+    take: 2,
+  });
+  if (profiles.length !== 1) return 'Production';
+  return terminologyFrom(profiles[0].terminology).production;
+}
+
 export async function Nav() {
+  const principal = await requirePrincipal();
+
   const visible = await Promise.all(
     ITEMS.map(async (item) => ((await currentUserCan(item.permission)) ? item : null)),
   );
-  const items = visible.filter((i): i is (typeof ITEMS)[number] => i !== null);
+  const produce = await productionLabel(principal.organisationId);
+  const items = visible
+    .filter((i): i is (typeof ITEMS)[number] => i !== null)
+    .map((item) => (item.href === '/production' ? { ...item, label: produce } : item));
 
   if (items.length === 0) return null;
 

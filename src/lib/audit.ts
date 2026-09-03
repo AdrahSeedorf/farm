@@ -40,6 +40,8 @@ export type AuditAction =
   | 'healthProgramme.revoke'
   | 'cost.allocate'
   | 'cost.reverse'
+  | 'production.record'
+  | 'production.correct'
   | 'productionGrade.create'
   | 'productionGrade.update'
   | 'productionGrade.archive'
