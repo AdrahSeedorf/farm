@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { parseStandardTable, toStandardMap } from '../standards';
+import {
+  parseStandardTable,
+  parseLayCurveTable,
+  toStandardMap,
+  toLayCurveMap,
+  detectKind,
+} from '../standards';
 
 describe('parsing a breed standard table', () => {
   it('reads a plain days-and-grams table', () => {
@@ -111,5 +117,102 @@ ageDays,grams
 
   it('shapes rows for storage as strings keyed by age', () => {
     expect(toStandardMap([{ ageDays: 7, grams: 70 }])).toEqual({ '7': 70 });
+  });
+});
+
+describe('parsing a lay curve', () => {
+  it('reads a weeks-and-percentage table, as guides publish it', () => {
+    const r = parseLayCurveTable(`week,henDayPct
+20,28.5
+21,58
+22,80.4`);
+    expect(r.errors).toEqual([]);
+    expect(r.rows).toEqual([
+      { ageDays: 140, pct: 28.5 },
+      { ageDays: 147, pct: 58 },
+      { ageDays: 154, pct: 80.4 },
+    ]);
+  });
+
+  it('keeps one decimal, because rounding 90.4 to 90 moves every target', () => {
+    const r = parseLayCurveTable(`week,laying rate
+28,94.36`);
+    expect(r.rows[0].pct).toBe(94.4);
+  });
+
+  it('accepts the several names guides give the same column', () => {
+    for (const header of ['henDayPct', 'Lay %', 'Laying rate', 'Production (%)', 'hen-day', '%']) {
+      const r = parseLayCurveTable(`week,${header}\n20,28.5`);
+      expect(r.errors, header).toEqual([]);
+    }
+  });
+
+  it('reads a figure written with its percent sign', () => {
+    expect(parseLayCurveTable(`week,lay\n20,28.5%`).rows[0].pct).toBe(28.5);
+  });
+
+  it('REFUSES A FIGURE ABOVE 100 — a hen lays at most one egg a day', () => {
+    const r = parseLayCurveTable(`week,henDayPct
+20,28.5
+21,580`);
+    expect(r.errors.join(' ')).toMatch(/Line 3/);
+    expect(r.errors.join(' ')).toMatch(/at most one egg a day/);
+    expect(r.rows).toHaveLength(1);
+  });
+
+  it('accepts a zero, because a curve may start before the first egg', () => {
+    expect(parseLayCurveTable(`week,lay\n18,0\n19,5`).errors).toEqual([]);
+  });
+
+  it('DOES NOT WARN WHEN THE CURVE FALLS — a lay curve is supposed to', () => {
+    // The weight parser warns about exactly this shape. A flock peaks around
+    // week 28 and declines for the rest of the cycle; warning here would fire on
+    // every correct table there is.
+    const r = parseLayCurveTable(`week,henDayPct
+28,94
+40,90
+60,82`);
+    expect(r.warnings.join(' ')).not.toMatch(/falls/);
+  });
+
+  it('warns when the table looks like fractions rather than percentages', () => {
+    const r = parseLayCurveTable(`week,lay
+20,0.28
+21,0.58
+22,0.80`);
+    expect(r.warnings.join(' ')).toMatch(/fractions \(0.9\) rather than percentages/);
+    // Warned, not refused — the farm decides.
+    expect(r.rows).toHaveLength(3);
+  });
+
+  it('rejects a table with no production column', () => {
+    expect(parseLayCurveTable(`week,grams\n20,1500`).errors.join(' ')).toMatch(
+      /No production column/,
+    );
+  });
+
+  it('shapes rows for storage as strings keyed by age', () => {
+    expect(toLayCurveMap([{ ageDays: 154, pct: 80.4 }])).toEqual({ '154': 80.4 });
+  });
+});
+
+describe('telling the two tables apart', () => {
+  it('reads a weight table off its header', () => {
+    expect(detectKind('week,grams\n1,70')).toBe('weight');
+  });
+
+  it('reads a lay curve off its header', () => {
+    expect(detectKind('week,henDayPct\n20,28.5')).toBe('lay');
+  });
+
+  it('looks past comments and blank lines to the real header', () => {
+    expect(detectKind('# ISA Brown, 2026 guide\n\nweek,laying rate\n20,28.5')).toBe('lay');
+  });
+
+  it('says nothing rather than guessing when the header names neither', () => {
+    // The loader then refuses and asks, rather than writing a lay curve into the
+    // weight column where it would look plausible and be nonsense.
+    expect(detectKind('week,height\n1,70')).toBeNull();
+    expect(detectKind('')).toBeNull();
   });
 });

@@ -113,10 +113,13 @@ export default async function SettingsPage() {
 
         <ul className="mt-4 divide-y divide-border-default">
           {breeds.map((b) => {
-            const loaded =
-              b.standards &&
-              typeof b.standards === 'object' &&
-              'bodyWeightByAgeDays' in (b.standards as Record<string, unknown>);
+            const standards =
+              b.standards && typeof b.standards === 'object'
+                ? (b.standards as Record<string, unknown>)
+                : {};
+            const hasWeight = 'bodyWeightByAgeDays' in standards;
+            const hasLay = 'henDayPctByAgeDays' in standards;
+
             return (
               <li key={b.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2.5">
                 <span className="text-[15px] font-semibold text-text-primary">{b.name}</span>
@@ -126,10 +129,17 @@ export default async function SettingsPage() {
                 ) : null}
                 <span
                   className={`ml-auto text-[13px] ${
-                    loaded ? 'text-text-secondary' : 'text-status-attention'
+                    hasWeight ? 'text-text-secondary' : 'text-status-attention'
                   }`}
                 >
-                  {loaded ? 'Weight table loaded' : 'No weight table'}
+                  {hasWeight ? 'Weight table' : 'No weight table'}
+                </span>
+                <span
+                  className={`text-[13px] ${
+                    hasLay ? 'text-text-secondary' : 'text-status-attention'
+                  }`}
+                >
+                  {hasLay ? '· Lay curve' : '· No lay curve'}
                 </span>
               </li>
             );
@@ -137,13 +147,13 @@ export default async function SettingsPage() {
         </ul>
 
         <p className="mt-4 rounded-control border border-border-default bg-surface-sunken px-3.5 py-3 text-[13px] text-text-secondary">
-          Weight figures come from the breeder&apos;s own management guide, never from this
-          system. Load one with{' '}
+          Both the weight table and the lay curve come from the breeder&apos;s own management
+          guide, never from this system. Load either with{' '}
           <code className="font-mono text-text-primary">
             npm run standards:load -- &lt;file.csv&gt; --breed &lt;key&gt;
           </code>
-          . A breed with none reports no comparison rather than scoring a flock against a
-          guess.
+          — the kind is read off the column headings and printed before anything is written. A
+          breed with none reports no comparison rather than scoring a flock against a guess.
         </p>
 
         {canManage ? (
