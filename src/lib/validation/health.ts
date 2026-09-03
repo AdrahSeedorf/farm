@@ -126,3 +126,83 @@ export const programmeImportSchema = z.object({
 });
 
 export type ProgrammeImportInput = z.infer<typeof programmeImportSchema>;
+
+// ---------------------------------------------------------------------------
+// RECORDING WHAT WAS ACTUALLY GIVEN
+// ---------------------------------------------------------------------------
+
+const todayUtc = () => {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+};
+
+export const healthEventSchema = z.object({
+  /** Which planned entry this fulfils. Blank for anything unplanned. */
+  programmeItemId: optionalText(40),
+  type: z.enum([
+    'VACCINATION',
+    'MEDICATION',
+    'SUPPLEMENT',
+    'TREATMENT',
+    'VET_VISIT',
+    'DIAGNOSIS',
+    'POST_MORTEM',
+    'OTHER',
+  ]),
+  name: z.string().trim().min(2, 'What was given?').max(80),
+  occurredOn: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the date picker.')
+    .transform((v) => new Date(`${v}T00:00:00.000Z`))
+    .refine((d) => !Number.isNaN(d.getTime()), 'That date is not valid.')
+    .refine(
+      (d) => d.getTime() <= todayUtc().getTime(),
+      'A treatment cannot be recorded for a future date.',
+    ),
+  route: z
+    .union([z.enum(ROUTES), z.literal('')])
+    .optional()
+    .transform((v) => (v === '' || v === undefined ? null : v)),
+  birdsTreated: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v === undefined || v === '' ? null : Number(v)))
+    .refine(
+      (v) => v === null || (Number.isInteger(v) && v > 0 && v <= 1_000_000),
+      'Enter a whole number of birds, or leave it blank.',
+    ),
+
+  // --- what it drew from the store ---------------------------------------
+  itemId: optionalText(40),
+  stockLocationId: optionalText(40),
+  quantityBase: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v === undefined || v === '' ? null : Number(v)))
+    .refine(
+      (v) => v === null || (Number.isFinite(v) && v > 0 && v <= 10_000_000),
+      'Enter how much was used, or leave it blank.',
+    ),
+
+  /**
+   * Copied onto the event rather than read back off the programme.
+   *
+   * The product actually used may differ from the one planned — a different
+   * brand, a different concentration — and a withdrawal period that changed
+   * retroactively is a food-safety failure.
+   */
+  eggWithdrawalDays: optionalDays,
+  meatWithdrawalDays: optionalDays,
+
+  administeredBy: optionalText(80),
+  vetName: optionalText(80),
+  diagnosis: optionalText(200),
+  notes: optionalText(500),
+
+  acknowledgedToken: optionalText(64),
+});
+
+export type HealthEventInput = z.infer<typeof healthEventSchema>;

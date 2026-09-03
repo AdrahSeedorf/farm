@@ -8,11 +8,13 @@ import { recordAudit } from '@/lib/audit';
 import { canAccessSite, orgFilter } from '@/lib/scope';
 import { parseProgrammeTable, type ParsedProgrammeItem } from '@/lib/health-programme';
 import { importProgrammeItems, touchProgramme } from '@/lib/health-service';
+import { recordHealthEvent } from '@/lib/health-event-service';
 import {
   programmeSchema,
   programmeItemSchema,
   approvalSchema,
   programmeImportSchema,
+  healthEventSchema,
 } from '@/lib/validation/health';
 import { fieldErrorsFrom } from '@/lib/validation/site';
 import { AuthorizationError } from '@/lib/rbac';
@@ -24,6 +26,9 @@ export interface HealthFormState {
   ok?: string;
   /** Read from a pasted table, shown before anything is written. */
   preview?: { rows: ParsedProgrammeItem[]; warnings: Warning[] };
+  /** Shown for confirmation. Nothing is written while these stand. */
+  warnings?: Warning[];
+  warningToken?: string;
 }
 
 export async function createProgramme(
@@ -374,4 +379,57 @@ export async function assignProgramme(
   revalidatePath(`/flocks/${flockId}/health`);
   revalidatePath('/health');
   return { ok: programmeId ? 'Programme assigned.' : 'Programme removed from this flock.' };
+}
+
+/**
+ * Record something that was actually given to a flock.
+ *
+ * Warn-then-confirm, like the daily record and the goods receipt. The warnings
+ * are about the ENTRY — a count larger than the flock, a date a month old, a
+ * store that cannot cover it — never about whether the treatment was wise.
+ */
+export async function recordEvent(
+  flockId: string,
+  _prev: HealthFormState,
+  formData: FormData,
+): Promise<HealthFormState> {
+  const principal = await requirePermission('health:create');
+
+  const flock = await db.animalGroup.findFirst({
+    where: { id: flockId, site: orgFilter(principal) },
+    select: { id: true, siteId: true, code: true },
+  });
+  if (!flock) return { error: 'That flock no longer exists.' };
+  if (!canAccessSite(principal, flock.siteId)) {
+    throw new AuthorizationError('health:create', flock.siteId);
+  }
+
+  const parsed = healthEventSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+
+  const result = await recordHealthEvent(principal, flockId, parsed.data);
+
+  if (result.status === 'needsConfirmation') {
+    return { warnings: result.warnings, warningToken: result.token };
+  }
+  if (result.status === 'error') return { error: result.message };
+
+  await recordAudit({
+    principal,
+    action: 'healthProgramme.update',
+    entityType: 'HealthEvent',
+    entityId: result.eventId,
+    after: {
+      flock: flock.code,
+      name: parsed.data.name,
+      occurredOn: parsed.data.occurredOn.toISOString().slice(0, 10),
+      issued: result.issuedBase,
+      costPesewas: result.costPesewas,
+    },
+  });
+
+  revalidatePath(`/flocks/${flockId}/health`);
+  revalidatePath('/health');
+  revalidatePath('/dashboard');
+  redirect(`/flocks/${flockId}/health?recorded=1`);
 }

@@ -5,6 +5,9 @@ import { pageGuard, currentUserCan } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
 import { canAccessSite } from '@/lib/scope';
 import { flockScheduleFor, assignableProgrammes } from '@/lib/health-service';
+import { healthEventsFor } from '@/lib/health-event-service';
+import { formatGHS, pesewas } from '@/lib/money';
+import { ROUTE_LABELS, type Route } from '@/lib/health-programme';
 import { approvalNote } from '@/lib/health-programme';
 import { db } from '@/lib/db';
 import { ScheduleList } from '../../../health/ScheduleList';
@@ -30,9 +33,12 @@ export default async function FlockHealthPage({
   });
   if (!flockSite || !canAccessSite(principal, flockSite.siteId)) notFound();
 
-  const [canEdit, programmes] = await Promise.all([
+  const [canEdit, canRecord, canSeeCost, programmes, events] = await Promise.all([
     currentUserCan('health:edit'),
+    currentUserCan('health:create'),
+    currentUserCan('finance:view'),
     assignableProgrammes(principal),
+    healthEventsFor(principal, flockId),
   ]);
 
   const due = view.schedule.filter((e) => e.status === 'OVERDUE' || e.status === 'DUE');
@@ -76,7 +82,13 @@ export default async function FlockHealthPage({
               Schedule
             </h2>
             <div className="mt-2.5">
-              <ScheduleList schedule={view.schedule} />
+              <ScheduleList
+                schedule={view.schedule}
+                canRecord={canRecord && !view.flock.closed}
+                recordHref={(entry) =>
+                  `/flocks/${flockId}/health/record?item=${entry.item.id}`
+                }
+              />
             </div>
           </section>
         </>
@@ -87,6 +99,54 @@ export default async function FlockHealthPage({
         </p>
       )}
 
+
+      <section className="mt-8">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h2 className="text-[12px] font-bold uppercase tracking-[0.14em] text-text-muted">
+            What was actually given
+          </h2>
+          {canRecord && !view.flock.closed ? (
+            <Link
+              href={`/flocks/${flockId}/health/record`}
+              className="text-[14px] font-semibold text-brand-primary"
+            >
+              Record something else
+            </Link>
+          ) : null}
+        </div>
+
+        {events.length === 0 ? (
+          <p className="mt-2.5 rounded-card border border-dashed border-border-strong bg-surface-card p-6 text-[15px] text-text-secondary">
+            Nothing recorded for this flock yet.
+          </p>
+        ) : (
+          <ul className="mt-2.5 divide-y divide-border-default overflow-hidden rounded-card border border-border-default bg-surface-card">
+            {events.map((e) => (
+              <li key={e.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-3">
+                <span className="tabular text-[13px] text-text-muted">
+                  {e.occurredOn.toISOString().slice(0, 10)}
+                </span>
+                <span className="text-[15px] font-semibold text-text-primary">{e.name}</span>
+                <span className="text-[13px] text-text-secondary">
+                  day {e.ageDays}
+                  {e.route ? ` · ${ROUTE_LABELS[e.route as Route]}` : ''}
+                  {e.birdsTreated ? ` · ${e.birdsTreated.toLocaleString('en-GH')} birds` : ''}
+                  {e.itemBatch ? ` · batch ${e.itemBatch.batchNumber}` : ''}
+                  {!e.programmeItemId ? ' · unplanned' : ''}
+                </span>
+                {canSeeCost && e.costPesewas ? (
+                  <span className="tabular text-[13px] text-text-secondary">
+                    {formatGHS(pesewas(e.costPesewas))}
+                  </span>
+                ) : null}
+                <span className="ml-auto text-[12px] text-text-muted">
+                  {e.administeredBy ?? e.recordedBy.name}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       {canEdit ? (
         <section className="mt-8 rounded-card border border-border-default bg-surface-card p-5 sm:p-6">
           <h2 className="text-[12px] font-bold uppercase tracking-[0.14em] text-brand-accent">

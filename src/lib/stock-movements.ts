@@ -275,8 +275,75 @@ export async function issueFeedWithin(
   principal: Principal,
   input: IssueFeedInput,
 ): Promise<IssuedFeed> {
+  const issued = await issueFromStock(tx, principal, {
+    itemId: input.itemId,
+    stockLocationId: input.stockLocationId,
+    quantityBase: input.quantityKg,
+    unitKey: 'kg',
+    occurredOn: input.occurredOn,
+    notes: `Fed to ${input.flockCode}`,
+    sourceType: 'dailyRecord',
+    sourceId: input.dailyRecordId,
+  });
+
+  // The cost entry is what makes a flock's feed bill add up. Omitted entirely
+  // when nothing costed, rather than written as a zero that would read as
+  // "this feed was free".
+  if (issued.costPesewas > 0) {
+    await tx.flockCostEntry.create({
+      data: {
+        animalGroupId: input.animalGroupId,
+        category: 'FEED',
+        amountPesewas: issued.costPesewas,
+        incurredOn: input.occurredOn,
+        description: `Feed issued: ${issued.issuedBase} kg`,
+        sourceType: 'dailyRecord',
+        sourceId: input.dailyRecordId,
+        recordedById: principal.userId,
+      },
+    });
+  }
+
+  return issued;
+}
+
+export interface IssueFromStockInput {
+  itemId: string;
+  stockLocationId: string;
+  /** How much to take, in the item's base unit. */
+  quantityBase: number;
+  /** The unit that quantity is expressed in — the dimension's base unit. */
+  unitKey: string;
+  occurredOn: Date;
+  notes?: string | null;
+  sourceType?: string | null;
+  sourceId?: string | null;
+}
+
+/**
+ * Take stock out, first-expiry-first-out, and say what it cost.
+ *
+ * ONE MOVEMENT PER BATCH. A single issue that spans two deliveries is two rows,
+ * because a movement carries one batch and one batch carries one price.
+ * Collapsing them into a single row at a blended price would throw away the only
+ * thing that makes a flock's costs reconcilable against invoices.
+ *
+ * SHORTFALL IS NOT AN ERROR HERE. `selectBatchesFEFO` reports what it could not
+ * cover and this issues what exists, because the caller has already shown the
+ * person a warning saying so. Throwing would take the record of what actually
+ * happened down with it — the feed that was fed, the vaccine that was given.
+ *
+ * Shared by feed issues and health events. They differ only in which cost
+ * category the caller writes afterwards; the stock arithmetic is identical, and
+ * two copies of it would eventually disagree.
+ */
+export async function issueFromStock(
+  tx: Prisma.TransactionClient,
+  principal: Principal,
+  input: IssueFromStockInput,
+): Promise<IssuedFeed> {
   const batches = await batchStockAt(tx, input.itemId, input.stockLocationId);
-  const { allocations, shortfall } = selectBatchesFEFO(batches, input.quantityKg);
+  const { allocations, shortfall } = selectBatchesFEFO(batches, input.quantityBase);
 
   const costByBatchId = new Map(batches.map((b) => [b.id, b.unitCostPesewas ?? null]));
   const { pesewas, uncostedBase } = costOfAllocations(allocations, costByBatchId);
@@ -288,36 +355,18 @@ export async function issueFeedWithin(
       stockLocationId: input.stockLocationId,
       type: 'ISSUE',
       quantityEntered: allocation.quantity,
-      enteredUomKey: 'kg',
+      enteredUomKey: input.unitKey,
       occurredOn: input.occurredOn,
       itemBatchId: allocation.batchId,
-      notes: `Fed to ${input.flockCode}`,
-      sourceType: 'dailyRecord',
-      sourceId: input.dailyRecordId,
+      notes: input.notes ?? null,
+      sourceType: input.sourceType ?? null,
+      sourceId: input.sourceId ?? null,
     });
     movementIds.push(movement.id);
   }
 
-  // The cost entry is what makes a flock's feed bill add up. Omitted entirely
-  // when nothing costed, rather than written as a zero that would read as
-  // "this feed was free".
-  if (pesewas > 0) {
-    await tx.flockCostEntry.create({
-      data: {
-        animalGroupId: input.animalGroupId,
-        category: 'FEED',
-        amountPesewas: pesewas,
-        incurredOn: input.occurredOn,
-        description: `Feed issued: ${round(input.quantityKg - shortfall)} kg`,
-        sourceType: 'dailyRecord',
-        sourceId: input.dailyRecordId,
-        recordedById: principal.userId,
-      },
-    });
-  }
-
   return {
-    issuedBase: round(input.quantityKg - shortfall),
+    issuedBase: round(input.quantityBase - shortfall),
     shortfallBase: shortfall,
     costPesewas: pesewas,
     uncostedBase,
