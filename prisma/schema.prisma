@@ -35,6 +35,13 @@ model Organisation {
   currency  String   @default("GHS")
   /// IANA timezone. Ghana has no DST.
   timezone  String   @default("Africa/Accra")
+
+  /// How many days a stock order takes to arrive, from placing it to receiving
+  /// it. Drives every "days of cover" judgement: four days of feed is
+  /// comfortable with a next-day supplier and an emergency with a fortnightly
+  /// one, so a fixed threshold would cry wolf on one farm and stay silent on
+  /// another. See src/lib/stock-cover.ts.
+  stockLeadTimeDays Int @default(7)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -44,6 +51,7 @@ model Organisation {
   items           Item[]
   auditLogs       AuditLog[]
   healthProgrammes HealthProgramme[]
+  breeds          Breed[]
 }
 
 model Site {
@@ -113,6 +121,7 @@ model SpeciesProfile {
   productionTypes ProductionTypeProfile[]
   animalGroups    AnimalGroup[]
   healthProgrammes HealthProgramme[]
+  breeds          Breed[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -139,6 +148,7 @@ model ProductionTypeProfile {
   lifecycleStages LifecycleStage[]
   animalGroups   AnimalGroup[]
   healthProgrammes HealthProgramme[]
+  breeds         Breed[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -181,7 +191,10 @@ model AnimalGroup {
   /// Human reference, e.g. "FLK-2027-01".
   code                    String
   name                    String?
-  breed                   String?
+  /// Chosen from the breed catalogue rather than typed. A typed breed cannot be
+  /// matched to a growth curve, and "Isa brown" / "ISA Brown" / "isa" would be
+  /// three different breeds as far as any later report was concerned.
+  breedId                 String?
   supplierName            String?
 
   /// Date of hatch/birth — the basis for ALL age calculations. Not arrival date:
@@ -208,6 +221,7 @@ model AnimalGroup {
   productionType ProductionTypeProfile @relation(fields: [productionTypeProfileId], references: [id])
   currentStage   LifecycleStage?       @relation(fields: [currentStageId], references: [id])
   healthProgramme HealthProgramme?     @relation(fields: [healthProgrammeId], references: [id])
+  breedRef       Breed?                @relation(fields: [breedId], references: [id])
 
   events        AnimalGroupEvent[]
   snapshots     AnimalGroupSnapshot[]
@@ -580,6 +594,51 @@ model StockMovement {
   @@index([itemId, occurredOn])
   @@index([stockLocationId, itemId])
   @@index([itemBatchId])
+}
+
+/// A breed, and the growth curve its breeder publishes for it.
+///
+/// WHY THE STANDARD LIVES HERE AND NOT ON THE PRODUCTION TYPE
+///   It used to hang off `ProductionTypeProfile` — "layer" — which is wrong the
+///   moment a farm runs two breeds or changes supplier. An ISA Brown and a
+///   Lohmann Brown are both layers and do not weigh the same at eight weeks, so
+///   scoring a flock against a shared "layer" curve would report a perfectly
+///   healthy flock as behind target.
+///
+/// The BREED NAMES are seeded as a convenience catalogue. The WEIGHT FIGURES
+/// are not: they come from the breeder's own management guide, loaded with
+/// `npm run standards:load`, and a breed with none reports no comparison rather
+/// than being scored against a guess.
+model Breed {
+  id                      String  @id @default(cuid())
+  organisationId          String
+  speciesProfileId        String?
+  productionTypeProfileId String?
+
+  /// Stable key, e.g. "isa_brown".
+  key      String
+  name     String
+  /// The breeding company, e.g. "ISA / Hendrix Genetics".
+  supplier String?
+
+  /// Breeder-published figures, keyed the same way the loader writes them:
+  ///   { "bodyWeightByAgeDays": { "7": 70, ... },
+  ///     "bodyWeightSource": "standards/isa-brown.csv",
+  ///     "bodyWeightLoadedAt": "2026-08-26T…" }
+  standards Json?
+
+  isActive Boolean @default(true)
+
+  organisation   Organisation           @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  speciesProfile SpeciesProfile?        @relation(fields: [speciesProfileId], references: [id])
+  productionType ProductionTypeProfile? @relation(fields: [productionTypeProfileId], references: [id])
+  animalGroups   AnimalGroup[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, key])
+  @@index([organisationId, isActive])
 }
 
 // ---------------------------------------------------------------------------

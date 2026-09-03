@@ -56,7 +56,16 @@ export const placementSchema = z
       .regex(/^[A-Z0-9-]+$/, 'Letters, numbers and hyphens only.'),
     name: z.string().trim().max(80).optional().transform((v) => (v === '' ? undefined : v)),
     productionUnitId: z.string().trim().min(1, 'Choose a house.'),
-    breed: z.string().trim().max(60).optional().transform((v) => (v === '' ? undefined : v)),
+    /**
+     * Chosen from the catalogue, not typed. A typed breed cannot be matched to a
+     * growth curve, and three spellings of one breed are three breeds as far as
+     * any later report is concerned.
+     */
+    breedId: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v) => (v === '' || v === undefined ? undefined : v)),
     supplierName: z
       .string()
       .trim()

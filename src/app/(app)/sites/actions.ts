@@ -16,6 +16,8 @@ import {
 export interface FormState {
   error?: string;
   fieldErrors?: Record<string, string>;
+  /** A short confirmation, for actions that stay on the page rather than redirect. */
+  ok?: string;
 }
 
 /**

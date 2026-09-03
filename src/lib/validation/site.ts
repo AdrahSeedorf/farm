@@ -64,6 +64,22 @@ export type ProductionUnitInput = z.infer<typeof productionUnitSchema>;
 export const organisationSchema = z.object({
   name: z.string().trim().min(2, 'Enter a name.').max(80),
   legalName: optionalText(120),
+  /**
+   * Days between placing a stock order and receiving it.
+   *
+   * A setting rather than a constant because it is the threshold every "days of
+   * cover" judgement is measured against: four days of feed is comfortable with
+   * a next-day supplier and an emergency with a fortnightly one.
+   */
+  stockLeadTimeDays: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v === undefined || v === '' ? 7 : Number(v)))
+    .refine(
+      (v) => Number.isInteger(v) && v >= 0 && v <= 365,
+      'Enter a whole number of days, up to a year.',
+    ),
   /** Currency and timezone are deliberately not editable yet — see the settings page. */
 });
 
@@ -90,3 +106,10 @@ export function fieldErrorsFrom(error: z.ZodError): Record<string, string> {
   }
   return result;
 }
+
+export const breedSchema = z.object({
+  name: z.string().trim().min(2, 'Enter a breed name.').max(60),
+  supplier: optionalText(80),
+});
+
+export type BreedInput = z.infer<typeof breedSchema>;

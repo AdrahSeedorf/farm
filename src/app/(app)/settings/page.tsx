@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { pageGuard, currentUserCan } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
 import { OrganisationForm } from './OrganisationForm';
+import { BreedForm } from './BreedForm';
 import { updateOrganisation } from './actions';
 
 export const metadata: Metadata = { title: 'Settings' };
@@ -17,6 +18,11 @@ export default async function SettingsPage() {
   if (!org) return <Forbidden area="settings" roles={principal.roles} />;
 
   const canManage = await currentUserCan('settings:manage');
+
+  const breeds = await db.breed.findMany({
+    where: { organisationId: principal.organisationId, isActive: true },
+    orderBy: { name: 'asc' },
+  });
 
   const recentAudit = (await currentUserCan('audit:view'))
     ? await db.auditLog.findMany({
@@ -39,7 +45,11 @@ export default async function SettingsPage() {
           {canManage ? (
             <OrganisationForm
               action={updateOrganisation}
-              defaults={{ name: org.name, legalName: org.legalName }}
+              defaults={{
+                name: org.name,
+                legalName: org.legalName,
+                stockLeadTimeDays: org.stockLeadTimeDays,
+              }}
             />
           ) : (
             <dl className="space-y-3 text-[15px]">
@@ -50,6 +60,10 @@ export default async function SettingsPage() {
               <div>
                 <dt className="text-[13px] text-text-muted">Legal name</dt>
                 <dd className="text-text-primary">{org.legalName ?? '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-[13px] text-text-muted">Stock lead time</dt>
+                <dd className="text-text-primary">{org.stockLeadTimeDays} days</dd>
               </div>
             </dl>
           )}
@@ -70,6 +84,58 @@ export default async function SettingsPage() {
           reinterpret every amount and every date already recorded, so it is a migration,
           not a setting.
         </p>
+      </section>
+
+      <section className="mt-6 rounded-card border border-border-default bg-surface-card p-6">
+        <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-brand-accent">
+          Breeds
+        </h2>
+        <p className="mt-3 text-[14px] text-text-secondary">
+          Chosen when a flock is placed. The weight curve belongs to the breed, not to
+          &ldquo;layer&rdquo; — an ISA Brown and a Lohmann Brown do not weigh the same at
+          eight weeks.
+        </p>
+
+        <ul className="mt-4 divide-y divide-border-default">
+          {breeds.map((b) => {
+            const loaded =
+              b.standards &&
+              typeof b.standards === 'object' &&
+              'bodyWeightByAgeDays' in (b.standards as Record<string, unknown>);
+            return (
+              <li key={b.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2.5">
+                <span className="text-[15px] font-semibold text-text-primary">{b.name}</span>
+                <span className="font-mono text-[12px] text-text-muted">{b.key}</span>
+                {b.supplier ? (
+                  <span className="text-[13px] text-text-secondary">{b.supplier}</span>
+                ) : null}
+                <span
+                  className={`ml-auto text-[13px] ${
+                    loaded ? 'text-text-secondary' : 'text-status-attention'
+                  }`}
+                >
+                  {loaded ? 'Weight table loaded' : 'No weight table'}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+
+        <p className="mt-4 rounded-control border border-border-default bg-surface-sunken px-3.5 py-3 text-[13px] text-text-secondary">
+          Weight figures come from the breeder&apos;s own management guide, never from this
+          system. Load one with{' '}
+          <code className="font-mono text-text-primary">
+            npm run standards:load -- &lt;file.csv&gt; --breed &lt;key&gt;
+          </code>
+          . A breed with none reports no comparison rather than scoring a flock against a
+          guess.
+        </p>
+
+        {canManage ? (
+          <div className="mt-5 border-t border-border-default pt-5">
+            <BreedForm />
+          </div>
+        ) : null}
       </section>
 
       {recentAudit.length > 0 ? (

@@ -167,7 +167,10 @@ export function stageDrift(
  * inventing plausible-looking figures would be worse than having none, because
  * they would be trusted and acted on.
  *
- * Stored in `ProductionTypeProfile.standards.bodyWeightByAgeDays`.
+ * Stored in `Breed.standards.bodyWeightByAgeDays` — per BREED, not per
+ * production type. An ISA Brown and a Lohmann Brown are both layers and do not
+ * weigh the same at eight weeks; a shared "layer" curve would report a healthy
+ * flock as behind target.
  */
 export type WeightStandard = Record<number, number>;
 
@@ -203,7 +206,7 @@ export function standardWeightAt(ageDays: number, standard: WeightStandard): num
   return Math.round(lower.grams + ratio * (upper.grams - lower.grams));
 }
 
-/** Read a weight standard out of a production type's configured standards. */
+/** Read a weight standard out of a breed's configured standards. */
 export function weightStandardFrom(standards: unknown): WeightStandard {
   if (!standards || typeof standards !== 'object') return {};
   const raw = (standards as Record<string, unknown>).bodyWeightByAgeDays;

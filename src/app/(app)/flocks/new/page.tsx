@@ -54,7 +54,14 @@ export default async function NewFlockPage() {
   }
 
   const today = new Date();
-  const suggestedCode = await suggestFlockCode(site.id, today.getUTCFullYear());
+  const [suggestedCode, breeds] = await Promise.all([
+    suggestFlockCode(site.id, today.getUTCFullYear()),
+    db.breed.findMany({
+      where: { ...orgFilter(principal), isActive: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, standards: true },
+    }),
+  ]);
   const action = placeFlock.bind(null, site.id);
 
   return (
@@ -72,6 +79,15 @@ export default async function NewFlockPage() {
         <PlacementForm
           action={action}
           houses={site.productionUnits}
+          breeds={breeds.map((b) => ({
+            id: b.id,
+            name: b.name,
+            hasStandard: Boolean(
+              b.standards &&
+                typeof b.standards === 'object' &&
+                'bodyWeightByAgeDays' in (b.standards as Record<string, unknown>),
+            ),
+          }))}
           suggestedCode={suggestedCode}
           today={today.toISOString().slice(0, 10)}
         />

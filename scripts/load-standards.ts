@@ -7,8 +7,13 @@ import { parseStandardTable, toStandardMap } from '../src/lib/standards';
 /**
  * Load a breed's body-weight standard — ADRAH Farms
  *
- *   npm run standards:load -- standards/isa-brown.csv
- *   npm run standards:load -- standards/isa-brown.csv --dry-run
+ *   npm run standards:load -- standards/isa-brown.csv --breed isa_brown
+ *   npm run standards:load -- standards/isa-brown.csv --breed isa_brown --dry-run
+ *
+ * The breed key is REQUIRED. A weight curve belongs to a breed, not to "layer":
+ * an ISA Brown and a Lohmann Brown are both layers and do not weigh the same at
+ * eight weeks, so loading one table against every layer would report a healthy
+ * flock as behind target.
  *
  * The file is a two-column table copied out of the breed's management guide:
  *
@@ -35,10 +40,12 @@ const db = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes('--dry-run');
-  const file = args.find((a) => !a.startsWith('--'));
+  const breedIndex = args.indexOf('--breed');
+  const breedKey = breedIndex === -1 ? undefined : args[breedIndex + 1];
+  const file = args.filter((a, i) => !a.startsWith('--') && i !== breedIndex + 1)[0];
 
-  if (!file) {
-    console.error('Usage: npm run standards:load -- <file.csv> [--dry-run]\n');
+  if (!file || !breedKey) {
+    console.error('Usage: npm run standards:load -- <file.csv> --breed <key> [--dry-run]\n');
     console.error('The file is a two-column table from your breed guide:\n');
     console.error('  week,grams');
     console.error('  1,70');
@@ -74,19 +81,26 @@ async function main() {
     return;
   }
 
-  const layer = await db.productionTypeProfile.findFirst({ where: { key: 'layer' } });
-  if (!layer) {
-    console.error('\n  No layer production type found. Run `npm run db:seed` first.');
+  const breed = await db.breed.findFirst({ where: { key: breedKey } });
+  if (!breed) {
+    const known = await db.breed.findMany({ select: { key: true, name: true } });
+    console.error(`\n  No breed with the key "${breedKey}".`);
+    if (known.length > 0) {
+      console.error('  Known breeds:');
+      for (const b of known) console.error(`    ${b.key.padEnd(18)} ${b.name}`);
+    } else {
+      console.error('  No breeds are set up. Run `npm run db:seed` first.');
+    }
     process.exit(1);
   }
 
   const existing =
-    layer.standards && typeof layer.standards === 'object' && !Array.isArray(layer.standards)
-      ? (layer.standards as Record<string, unknown>)
+    breed.standards && typeof breed.standards === 'object' && !Array.isArray(breed.standards)
+      ? (breed.standards as Record<string, unknown>)
       : {};
 
-  await db.productionTypeProfile.update({
-    where: { id: layer.id },
+  await db.breed.update({
+    where: { id: breed.id },
     data: {
       standards: {
         ...existing,
@@ -98,8 +112,8 @@ async function main() {
     },
   });
 
-  console.log(`\n  ✓ Loaded into the layer production type.`);
-  console.log('    Weight samples now compare against this standard.\n');
+  console.log(`\n  ✓ Loaded into ${breed.name}.`);
+  console.log('    Weight samples on flocks of this breed now compare against it.\n');
 }
 
 main()

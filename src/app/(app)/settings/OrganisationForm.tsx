@@ -19,7 +19,7 @@ export function OrganisationForm({
   defaults,
 }: {
   action: (prev: FormState, formData: FormData) => Promise<FormState>;
-  defaults: { name: string; legalName: string | null };
+  defaults: { name: string; legalName: string | null; stockLeadTimeDays: number };
 }) {
   const [state, formAction] = useActionState(action, {} as FormState);
   const e = state.fieldErrors ?? {};
@@ -48,6 +48,23 @@ export function OrganisationForm({
           defaultValue={defaults.legalName ?? ''}
           placeholder="ADRAH Farms Ltd"
           error={e.legalName}
+        />
+      </Field>
+      <Field
+        label="Stock lead time"
+        htmlFor="org-lead-time"
+        error={e.stockLeadTimeDays}
+        hint="Days between placing an order and it arriving. Every days-of-cover warning is measured against this — four days of feed is comfortable with a next-day supplier and an emergency with a fortnightly one."
+      >
+        <TextInput
+          id="org-lead-time"
+          name="stockLeadTimeDays"
+          type="number"
+          inputMode="numeric"
+          min="0"
+          max="365"
+          defaultValue={String(defaults.stockLeadTimeDays ?? 7)}
+          error={e.stockLeadTimeDays}
         />
       </Field>
       <Submit />

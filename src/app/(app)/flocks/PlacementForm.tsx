@@ -9,6 +9,8 @@ import type { FormState } from '../sites/actions';
 interface Props {
   action: (prev: FormState, formData: FormData) => Promise<FormState>;
   houses: { id: string; name: string; code: string }[];
+  /** The breed catalogue. Empty only if the seed has not run. */
+  breeds: { id: string; name: string; hasStandard: boolean }[];
   suggestedCode: string;
   today: string;
 }
@@ -22,7 +24,7 @@ function Submit() {
   );
 }
 
-export function PlacementForm({ action, houses, suggestedCode, today }: Props) {
+export function PlacementForm({ action, houses, breeds, suggestedCode, today }: Props) {
   const [state, formAction] = useActionState(action, {} as FormState);
   const e = state.fieldErrors ?? {};
 
@@ -128,13 +130,21 @@ export function PlacementForm({ action, houses, suggestedCode, today }: Props) {
       </div>
 
       <div className="grid gap-5 sm:grid-cols-2">
-        <Field label="Breed" htmlFor="breed" error={e.breed}>
-          <TextInput
-            id="breed"
-            name="breed"
-            placeholder="Isa Brown"
-            error={e.breed}
-          />
+        <Field
+          label="Breed"
+          htmlFor="breedId"
+          error={e.breedId}
+          hint="Chosen, not typed — a typed breed cannot be matched to a growth curve."
+        >
+          <Select id="breedId" name="breedId" error={e.breedId}>
+            <option value="">Not recorded</option>
+            {breeds.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+                {b.hasStandard ? '' : ' — no weight table loaded'}
+              </option>
+            ))}
+          </Select>
         </Field>
         <Field label="Supplier / hatchery" htmlFor="supplierName" error={e.supplierName}>
           <TextInput id="supplierName" name="supplierName" error={e.supplierName} />

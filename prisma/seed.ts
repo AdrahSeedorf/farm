@@ -237,6 +237,41 @@ async function main() {
   }
   console.log(`  ✓ Poultry species, layer production type, ${stages.length} lifecycle stages`);
 
+  // --- Breed catalogue ------------------------------------------------------
+  //
+  // NAMES ONLY. These are layer breeds commonly sold as day-olds in Ghana,
+  // seeded so the placement form offers a choice instead of a free-text box:
+  // "Isa brown", "ISA Brown" and "isa" would otherwise be three different breeds
+  // as far as any later report is concerned.
+  //
+  // NO WEIGHT FIGURES ARE SEEDED. Those come from each breeder's own management
+  // guide via `npm run standards:load`, and a breed without them reports no
+  // comparison rather than scoring a flock against a guess.
+  const layerBreeds = [
+    ['isa_brown', 'ISA Brown', 'ISA / Hendrix Genetics'],
+    ['lohmann_brown', 'Lohmann Brown Classic', 'Lohmann Breeders'],
+    ['hy_line_brown', 'Hy-Line Brown', 'Hy-Line International'],
+    ['bovans_brown', 'Bovans Brown', 'Bovans / Hendrix Genetics'],
+    ['hisex_brown', 'Hisex Brown', 'Hisex / Hendrix Genetics'],
+    ['nova_brown', 'Nova Brown', 'Hendrix Genetics'],
+  ] as const;
+
+  for (const [key, name, supplier] of layerBreeds) {
+    await db.breed.upsert({
+      where: { organisationId_key: { organisationId: org.id, key } },
+      update: {},
+      create: {
+        organisationId: org.id,
+        speciesProfileId: poultry.id,
+        productionTypeProfileId: layer.id,
+        key,
+        name,
+        supplier,
+      },
+    });
+  }
+  console.log(`  \u2713 ${layerBreeds.length} layer breeds (names only, no weight figures)`);
+
   // --- First owner account -------------------------------------------------
   //
   // Created only if no user exists, so re-seeding never resets your password.

@@ -82,7 +82,7 @@ export async function placeFlock(
           productionTypeProfileId: productionType.id,
           code: input.code,
           name: input.name,
-          breed: input.breed,
+          breedId: input.breedId ?? null,
           supplierName: input.supplierName,
           dateOfHatch: input.dateOfHatch,
           arrivalDate: input.arrivalDate,

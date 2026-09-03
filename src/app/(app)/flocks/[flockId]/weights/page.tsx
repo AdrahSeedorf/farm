@@ -36,7 +36,8 @@ export default async function WeightsPage({
   const flock = await db.animalGroup.findFirst({
     where: { id: flockId, site: { ...orgFilter(principal) } },
     include: {
-      productionType: { select: { standards: true } },
+      // The weight curve is a property of the BREED, not of "layer".
+      breedRef: { select: { name: true, standards: true } },
       weightSamples: {
         orderBy: [{ takenOn: 'desc' }],
         include: { recordedBy: { select: { name: true } } },
@@ -47,7 +48,7 @@ export default async function WeightsPage({
   if (!canAccessSite(principal, flock.siteId)) notFound();
 
   const canRecord = await currentUserCan('production:create', flock.siteId);
-  const standard = weightStandardFrom(flock.productionType.standards);
+  const standard = weightStandardFrom(flock.breedRef?.standards);
   const hasStandard = Object.keys(standard).length > 0;
   const today = new Date();
 
@@ -78,9 +79,9 @@ export default async function WeightsPage({
 
       {!hasStandard ? (
         <p className="mt-5 rounded-control border-l-2 border-status-attention bg-status-attention-bg px-4 py-3 text-[14px] text-[#6B4E12]">
-          No breed standard loaded, so weights show without a target. The figures come from
-          your breed&apos;s management guide — Isa, Lohmann, Hy-Line and Bovans all publish
-          them. Loading them turns each sample into on target or behind.
+          {flock.breedRef
+            ? `No weight standard loaded for ${flock.breedRef.name}, so samples show without a target. The figures come from that breed's management guide — load them with npm run standards:load and every sample becomes on target or behind.`
+            : 'No breed was chosen for this flock, so there is nothing to compare against. Set the breed on the flock, then load that breed\u2019s weight table.'}
         </p>
       ) : null}
 

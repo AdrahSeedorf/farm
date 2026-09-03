@@ -31,6 +31,7 @@ export default async function FlockPage({
       site: { select: { id: true, name: true } },
       productionUnit: { select: { name: true, code: true } },
       currentStage: { select: { name: true } },
+      breedRef: { select: { name: true } },
       productionType: {
         select: {
           name: true,
@@ -103,7 +104,7 @@ export default async function FlockPage({
           </div>
           <p className="mt-1 text-[15px] text-text-secondary">
             {[
-              flock.breed,
+              flock.breedRef?.name,
               flock.productionUnit?.name,
               flock.site.name,
               flock.supplierName ? `from ${flock.supplierName}` : null,

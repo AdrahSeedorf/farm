@@ -151,7 +151,17 @@ export async function stockOverview(
   options: { windowDays?: number; leadTimeDays?: number; expiryHorizonDays?: number } = {},
 ): Promise<StockOverviewRow[]> {
   const windowDays = options.windowDays ?? DEFAULT_WINDOW_DAYS;
-  const leadTimeDays = options.leadTimeDays ?? DEFAULT_LEAD_TIME_DAYS;
+  // The farm's own lead time, not a guess. Falls back to the documented default
+  // only if the organisation row has somehow gone missing.
+  const leadTimeDays =
+    options.leadTimeDays ??
+    (
+      await db.organisation.findUnique({
+        where: { id: principal.organisationId },
+        select: { stockLeadTimeDays: true },
+      })
+    )?.stockLeadTimeDays ??
+    DEFAULT_LEAD_TIME_DAYS;
   const horizon = options.expiryHorizonDays ?? 60;
 
   const windowStart = new Date(
