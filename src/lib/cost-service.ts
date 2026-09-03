@@ -2,7 +2,7 @@ import 'server-only';
 import { db } from '@/lib/db';
 import type { Principal } from '@/lib/rbac';
 import { orgFilter, siteFilter } from '@/lib/scope';
-import type { CostCategory } from '@/lib/flock-costing';
+import { productionStartFrom, type CostCategory } from '@/lib/flock-costing';
 import {
   birdDaysBetween,
   splitAllocation,
@@ -379,6 +379,95 @@ export async function costEntriesFor(
   });
 
   return rows.map((r) => ({ ...r, category: r.category as CostCategory }));
+}
+
+export interface PointOfLayContext {
+  /** The day the flock started producing, from its own stage history. */
+  occurredOn: Date;
+  ageDays: number | null;
+  /** Birds alive on that day, from the population ledger. */
+  pulletsAtStart: number;
+}
+
+/**
+ * When this flock came into production, and how many birds were alive that day.
+ *
+ * The stage is identified by LifecycleStage.isProductionStart on the flock's own
+ * production type, so nothing in this file — or in flock-costing.ts — knows what
+ * a laying hen is. A broiler profile marks no stage, and this returns null.
+ *
+ * The headcount is derived from the ledger AT THAT DATE rather than read from
+ * today's population. Between coming into lay and now, birds die; dividing the
+ * rearing cost by today's smaller number would inflate the cost of a pullet by
+ * charging it for losses that happened after it became one.
+ */
+export async function pointOfLayFor(
+  principal: Principal,
+  flockId: string,
+): Promise<PointOfLayContext | null> {
+  const flock = await db.animalGroup.findFirst({
+    where: { id: flockId, site: orgFilter(principal), ...siteFilter(principal) },
+    select: {
+      productionType: {
+        select: {
+          lifecycleStages: {
+            where: { isProductionStart: true },
+            select: { id: true },
+          },
+        },
+      },
+      events: {
+        select: { type: true, delta: true, occurredOn: true, toStageId: true, ageDays: true },
+      },
+    },
+  });
+  if (!flock) return null;
+
+  const stageIds = flock.productionType.lifecycleStages.map((s) => s.id);
+  const start = productionStartFrom(
+    flock.events
+      .filter((e) => e.type === 'STAGE_CHANGE')
+      .map((e) => ({ toStageId: e.toStageId, occurredOn: e.occurredOn, ageDays: e.ageDays })),
+    stageIds,
+  );
+  if (!start) return null;
+
+  const pulletsAtStart = Math.max(
+    0,
+    flock.events.reduce(
+      (sum, e) => (e.occurredOn <= endOfDay(start.occurredOn) ? sum + e.delta : sum),
+      0,
+    ),
+  );
+
+  return { ...start, pulletsAtStart };
+}
+
+/** The farm's last recorded quote for a ready-to-lay pullet. Null until entered. */
+export async function pulletMarketPrice(principal: Principal): Promise<{
+  pesewas: number;
+  quotedOn: Date;
+  source: string | null;
+} | null> {
+  const org = await db.organisation.findUnique({
+    where: { id: principal.organisationId },
+    select: {
+      pulletMarketPricePesewas: true,
+      pulletMarketPriceOn: true,
+      pulletMarketPriceSource: true,
+    },
+  });
+
+  // Both the figure AND its date are required. A price with no date cannot be
+  // reported honestly, and reporting it without saying how old it is would be
+  // exactly the stale-figure-as-fact problem the field exists to avoid.
+  if (!org?.pulletMarketPricePesewas || !org.pulletMarketPriceOn) return null;
+
+  return {
+    pesewas: org.pulletMarketPricePesewas,
+    quotedOn: org.pulletMarketPriceOn,
+    source: org.pulletMarketPriceSource,
+  };
 }
 
 function endOfDay(d: Date): Date {

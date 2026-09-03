@@ -21,9 +21,15 @@ export async function updateOrganisation(
   });
   if (!before) return { error: 'Organisation not found.' };
 
+  // The form field is called `pulletMarketPrice` and holds cedis; the column is
+  // called `pulletMarketPricePesewas` and holds pesewas. Mapped here rather than
+  // named alike, so nothing can ever write a cedi figure into a pesewa column
+  // and quietly make every pullet a hundred times cheaper.
+  const { pulletMarketPrice, ...fields } = parsed.data;
+
   const after = await db.organisation.update({
     where: { id: principal.organisationId },
-    data: parsed.data,
+    data: { ...fields, pulletMarketPricePesewas: pulletMarketPrice },
   });
 
   await recordAudit({

@@ -49,6 +49,13 @@ export default async function SettingsPage() {
                 name: org.name,
                 legalName: org.legalName,
                 stockLeadTimeDays: org.stockLeadTimeDays,
+                pulletMarketPrice:
+                  org.pulletMarketPricePesewas === null
+                    ? ''
+                    : (org.pulletMarketPricePesewas / 100).toFixed(2),
+                pulletMarketPriceOn:
+                  org.pulletMarketPriceOn?.toISOString().slice(0, 10) ?? '',
+                pulletMarketPriceSource: org.pulletMarketPriceSource ?? '',
               }}
             />
           ) : (

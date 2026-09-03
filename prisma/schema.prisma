@@ -42,6 +42,21 @@ model Organisation {
   /// one, so a fixed threshold would cry wolf on one farm and stay silent on
   /// another. See src/lib/stock-cover.ts.
   stockLeadTimeDays Int @default(7)
+
+  /// What a ready-to-lay pullet costs to BUY, as last quoted to this farm.
+  ///
+  /// NULLABLE, AND NOTHING FILLS IT IN AUTOMATICALLY. It is the figure the whole
+  /// rear-or-buy decision turns on, it moves with the season and the supplier,
+  /// and a default baked into software would be a stale number wearing the
+  /// clothes of a fact. The comparison is simply not shown until someone enters
+  /// a real quote.
+  ///
+  /// Dated, so the screen can say how old the quote is instead of presenting a
+  /// figure from last year as though it were today's.
+  pulletMarketPricePesewas Int?
+  pulletMarketPriceOn      DateTime? @db.Date
+  pulletMarketPriceSource  String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -169,6 +184,20 @@ model LifecycleStage {
   /// Advisory age window in days; used to prompt, never to force a transition.
   typicalStartAgeDays     Int?
   typicalEndAgeDays       Int?
+
+  /// The stage at which this group STOPS being an investment and STARTS being
+  /// an asset that earns — first egg for a layer, first milking for a dairy
+  /// herd, first harvest for a pond.
+  ///
+  /// A FLAG ON THE PROFILE RATHER THAN A KEY IN THE CODE. Reading
+  /// `key === 'laying'` in the costing layer would put a poultry word in the
+  /// core, and the day this platform carries a second species that word would
+  /// be wrong. Which stage it is belongs to the production type, which is data.
+  ///
+  /// Some production types have no such stage at all — a broiler is sold, never
+  /// switched over — and then the cost-per-point-of-lay figure simply does not
+  /// apply and is not shown.
+  isProductionStart       Boolean @default(false)
 
   productionType ProductionTypeProfile @relation(fields: [productionTypeProfileId], references: [id], onDelete: Cascade)
   animalGroups   AnimalGroup[]

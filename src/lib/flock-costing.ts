@@ -281,6 +281,142 @@ export function versusBoughtPullet(
 }
 
 // ---------------------------------------------------------------------------
+// THE POINT OF LAY ITSELF
+// ---------------------------------------------------------------------------
+
+export interface StageChange {
+  toStageId: string | null;
+  occurredOn: Date;
+  ageDays: number | null;
+}
+
+export interface ProductionStart {
+  occurredOn: Date;
+  ageDays: number | null;
+}
+
+/**
+ * The day this group started producing, from its OWN history.
+ *
+ * Takes the ids of the stages the production type marks as its production
+ * start, so nothing here knows what a laying hen is — see
+ * LifecycleStage.isProductionStart.
+ *
+ * THE EARLIEST such change wins, not the latest. A flock moved into lay, back
+ * out during a moult and into lay again has come into lay once; the second
+ * transition is a return, and dating the rearing investment from it would erase
+ * the months in between.
+ *
+ * Returns null when it has not happened — a flock still growing, or a
+ * production type that has no such stage at all.
+ */
+export function productionStartFrom(
+  changes: StageChange[],
+  productionStartStageIds: string[],
+): ProductionStart | null {
+  if (productionStartStageIds.length === 0) return null;
+  const ids = new Set(productionStartStageIds);
+
+  const matching = changes
+    .filter((c) => c.toStageId !== null && ids.has(c.toStageId))
+    .sort((a, b) => a.occurredOn.getTime() - b.occurredOn.getTime());
+
+  const first = matching[0];
+  return first ? { occurredOn: first.occurredOn, ageDays: first.ageDays } : null;
+}
+
+// ---------------------------------------------------------------------------
+// HOW OLD IS THE PRICE
+// ---------------------------------------------------------------------------
+
+/**
+ * A pullet quote older than this is reported with its age attached.
+ *
+ * A quarter, because that is roughly how long a quoted pullet price in Ghana
+ * stays useful — feed costs move, and the dry season and the harmattan both
+ * shift what hatcheries charge. The figure is still SHOWN when it is older than
+ * this; it is just shown with its date, so nobody mistakes last year's price for
+ * this morning's.
+ */
+export const PRICE_STALE_AFTER_DAYS = 90;
+
+export function priceAgeDays(quotedOn: Date, asOf: Date = new Date()): number {
+  return Math.max(0, Math.round((startOfDay(asOf) - startOfDay(quotedOn)) / 86_400_000));
+}
+
+export function priceIsStale(quotedOn: Date, asOf: Date = new Date()): boolean {
+  return priceAgeDays(quotedOn, asOf) > PRICE_STALE_AFTER_DAYS;
+}
+
+export type RearOrBuy = 'REARING_CHEAPER' | 'BUYING_CHEAPER' | 'THE_SAME';
+
+export interface Comparison {
+  /** Reared cost − market price. Negative means rearing won. */
+  differencePesewas: number;
+  verdict: RearOrBuy;
+  /** The difference as a percentage of the market price. */
+  pctOfMarket: number | null;
+}
+
+/**
+ * The rear-or-buy answer, for one flock.
+ *
+ * FORMULA: difference = costPerPullet − marketPrice
+ *
+ * Deliberately not softened into a "score" or a verdict on the farm. It answers
+ * one narrow question — did rearing THIS flock beat buying pullets at THAT
+ * price — and the answer belongs beside both figures so the person can see what
+ * it is made of.
+ */
+export function rearOrBuy(
+  costPerPulletPesewas: number | null,
+  marketPricePesewas: number | null,
+): Comparison | null {
+  const difference = versusBoughtPullet(costPerPulletPesewas, marketPricePesewas);
+  if (difference === null || marketPricePesewas === null) return null;
+
+  return {
+    differencePesewas: difference,
+    verdict:
+      difference < 0 ? 'REARING_CHEAPER' : difference > 0 ? 'BUYING_CHEAPER' : 'THE_SAME',
+    pctOfMarket: marketPricePesewas === 0 ? null : (difference / marketPricePesewas) * 100,
+  };
+}
+
+/**
+ * What the comparison means for the NEXT flock, in one sentence.
+ *
+ * Scaled to the flock, because a difference of GHS 4 a bird reads as small and
+ * "GHS 3,760 across the flock" does not. That multiplication is the whole point
+ * of putting the figure on a screen rather than in a spreadsheet.
+ */
+export function rearOrBuySentence(comparison: Comparison, pullets: number): string {
+  const perBird = Math.abs(comparison.differencePesewas);
+  const across = perBird * Math.max(0, pullets);
+
+  if (comparison.verdict === 'THE_SAME') {
+    return 'Rearing cost exactly what buying would have. Either route is the same money.';
+  }
+
+  const cheaper = comparison.verdict === 'REARING_CHEAPER';
+  return (
+    `${cheaper ? 'Rearing' : 'Buying'} was cheaper by ` +
+    `${formatPesewas(perBird)} a bird — ${formatPesewas(across)} across ${pullets.toLocaleString('en-GH')} pullets. ` +
+    (cheaper
+      ? 'That is what the five months of work were worth on this flock.'
+      : 'On these numbers the five months of rearing lost money against simply buying in.')
+  );
+}
+
+/** Cedis with two decimals, for embedding in a sentence. */
+function formatPesewas(amount: number): string {
+  return `GHS ${(amount / 100).toLocaleString('en-GH', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+// ---------------------------------------------------------------------------
 // COMPLETENESS
 // ---------------------------------------------------------------------------
 

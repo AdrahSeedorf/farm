@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parseCedis } from '@/lib/money';
 import { GHANA_REGIONS } from '@/lib/ghana';
 
 /**
@@ -80,8 +81,46 @@ export const organisationSchema = z.object({
       (v) => Number.isInteger(v) && v >= 0 && v <= 365,
       'Enter a whole number of days, up to a year.',
     ),
+  /**
+   * The going rate for a ready-to-lay pullet, and the day it was quoted.
+   *
+   * BOTH OR NEITHER. A price with no date cannot be reported honestly — the
+   * whole reason it is stored rather than hard-coded is that it goes off — so a
+   * figure without a date is refused rather than saved with today's stamped on
+   * it by default.
+   */
+  pulletMarketPrice: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v, ctx) => {
+      if (v === undefined || v === '') return null;
+      const parsed = parseCedis(v);
+      if (parsed === null) {
+        ctx.addIssue({ code: 'custom', message: 'That is not an amount — try 75 or 75.50.' });
+        return z.NEVER;
+      }
+      return parsed;
+    }),
+  pulletMarketPriceOn: z
+    .union([
+      z
+        .string()
+        .trim()
+        .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the date picker.')
+        .transform((v) => new Date(`${v}T00:00:00.000Z`)),
+      z.literal(''),
+    ])
+    .optional()
+    .transform((v) => (v === '' || v === undefined ? null : (v as Date))),
+  pulletMarketPriceSource: optionalText(80),
+
   /** Currency and timezone are deliberately not editable yet — see the settings page. */
-});
+})
+  .refine((v) => v.pulletMarketPrice === null || v.pulletMarketPriceOn !== null, {
+    message: 'Say when you were quoted this price — a pullet price with no date cannot be read.',
+    path: ['pulletMarketPriceOn'],
+  });
 
 export type OrganisationInput = z.infer<typeof organisationSchema>;
 

@@ -6,7 +6,7 @@ import { pageGuard } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
 import { orgFilter, canAccessSite } from '@/lib/scope';
 import { totalsFor } from '@/lib/flock-service';
-import { costEntriesFor } from '@/lib/cost-service';
+import { costEntriesFor, pointOfLayFor, pulletMarketPrice } from '@/lib/cost-service';
 import {
   totalCost,
   byCategory,
@@ -17,6 +17,11 @@ import {
   completenessNote,
   runningTotals,
   costSpan,
+  polCost,
+  rearOrBuy,
+  rearOrBuySentence,
+  priceIsStale,
+  priceAgeDays,
   CATEGORY_LABELS,
 } from '@/lib/flock-costing';
 import { formatGHS, pesewas } from '@/lib/money';
@@ -63,9 +68,11 @@ export default async function FlockCostsPage({
   if (!flock) notFound();
   if (!canAccessSite(principal, flock.siteId)) notFound();
 
-  const [entries, totals] = await Promise.all([
+  const [entries, totals, productionStart, market] = await Promise.all([
     costEntriesFor(principal, flock.id),
     totalsFor(flock.id),
+    pointOfLayFor(principal, flock.id),
+    pulletMarketPrice(principal),
   ]);
 
   const total = totalCost(entries);
@@ -79,6 +86,20 @@ export default async function FlockCostsPage({
   const span = costSpan(entries);
   const rows = runningTotals(entries).reverse();
   const largest = split[0]?.pesewas ?? 0;
+
+  // Only computed once the flock has actually reached production. A production
+  // type with no such stage — a broiler — never gets here, and neither does a
+  // flock still growing: an unfinished figure presented as a cost per pullet is
+  // a wrong figure, not an early one.
+  const pol = productionStart
+    ? polCost(
+        entries,
+        productionStart.occurredOn,
+        productionStart.pulletsAtStart,
+        productionStart.ageDays ?? 0,
+      )
+    : null;
+  const comparison = pol ? rearOrBuy(pol.costPerPulletPesewas, market?.pesewas ?? null) : null;
 
   return (
     <main className="mx-auto max-w-4xl px-5 py-8">
@@ -151,6 +172,66 @@ export default async function FlockCostsPage({
               <strong className="font-semibold">{formatGHS(pesewas(mortalityCost))}</strong>{' '}
               each.
             </p>
+          ) : null}
+
+          {pol && pol.costPerPulletPesewas !== null ? (
+            <section className="mt-8 rounded-card border-2 border-brand-primary bg-surface-card p-5 sm:p-6">
+              <h2 className="text-[12px] font-bold uppercase tracking-[0.14em] text-brand-primary">
+                Cost of a point-of-lay pullet
+              </h2>
+              <p className="mt-2 text-[13px] text-text-secondary">
+                Everything spent from placement to the day this flock came into lay, divided
+                by the pullets that reached it. Anything spent after that day is the cost of
+                running the flock, not of building it.
+              </p>
+
+              <p className="mt-5 text-4xl font-bold tracking-tight text-text-primary">
+                {formatGHS(pesewas(pol.costPerPulletPesewas))}
+              </p>
+              <p className="mt-1 text-[14px] text-text-secondary">
+                per pullet · {formatGHS(pesewas(pol.rearingCostPesewas))} across{' '}
+                {pol.pulletsAtPol.toLocaleString('en-GH')} birds
+              </p>
+              <p className="mt-2 text-[13px] text-text-muted">
+                Came into lay on {day(pol.polDate)}
+                {pol.ageDaysAtPol
+                  ? `, at ${pol.ageDaysAtPol} days — ${Math.round(pol.ageDaysAtPol / 7)} weeks`
+                  : ''}
+                . This flock&apos;s own date, not a standard age.
+              </p>
+
+              {comparison && market ? (
+                <div className="mt-5 border-t border-border-default pt-4">
+                  <p className="text-[15px] text-text-primary">
+                    {rearOrBuySentence(comparison, pol.pulletsAtPol)}
+                  </p>
+                  <p className="mt-2 text-[13px] text-text-muted">
+                    Against {formatGHS(pesewas(market.pesewas))} a pullet
+                    {market.source ? `, quoted by ${market.source}` : ''} on{' '}
+                    {day(market.quotedOn)}.
+                    {priceIsStale(market.quotedOn)
+                      ? ` That quote is ${priceAgeDays(market.quotedOn)} days old — check it still holds before deciding anything on it.`
+                      : ''}
+                  </p>
+                </div>
+              ) : (
+                /*
+                  No market price, no comparison — and a prompt rather than a
+                  guess. The rear-or-buy answer is the whole reason this figure
+                  exists, but it cannot be computed from anything the farm
+                  records; it needs a real quote from outside.
+                */
+                <p className="mt-5 border-t border-border-default pt-4 text-[14px] text-text-secondary">
+                  To know whether this beat buying pullets ready-to-lay, the system needs one
+                  number it cannot work out for itself: what a hatchery would charge you for
+                  one today. Enter it in{' '}
+                  <Link href="/settings" className="font-semibold text-brand-primary underline">
+                    Settings
+                  </Link>{' '}
+                  and the comparison appears here.
+                </p>
+              )}
+            </section>
           ) : null}
 
           <section className="mt-8 rounded-card border border-border-default bg-surface-card p-5 sm:p-6">

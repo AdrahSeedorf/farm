@@ -13,6 +13,12 @@ import {
   completenessNote,
   runningTotals,
   costSpan,
+  productionStartFrom,
+  priceAgeDays,
+  priceIsStale,
+  PRICE_STALE_AFTER_DAYS,
+  rearOrBuy,
+  rearOrBuySentence,
   CATEGORY_LABELS,
   COST_CATEGORIES,
   type CostEntry,
@@ -234,6 +240,106 @@ describe('cost per point-of-lay pullet', () => {
       // it moves with the season and the supplier.
       expect(versusBoughtPullet(6170, null)).toBeNull();
     });
+  });
+});
+
+describe('finding the day lay began', () => {
+  const LAYING = 'stage-laying';
+  const changes = [
+    { toStageId: 'stage-growing', occurredOn: d('2026-05-05'), ageDays: 29 },
+    { toStageId: LAYING, occurredOn: d('2026-08-25'), ageDays: 141 },
+    { toStageId: 'stage-depleting', occurredOn: d('2027-09-01'), ageDays: 513 },
+  ];
+
+  it('reads it off the flock’s own stage history', () => {
+    const start = productionStartFrom(changes, [LAYING])!;
+    expect(start.occurredOn.toISOString().slice(0, 10)).toBe('2026-08-25');
+    expect(start.ageDays).toBe(141);
+  });
+
+  it('TAKES THE FIRST TRANSITION, NOT THE LAST', () => {
+    // A flock moved into lay, out for a moult and back in has come into lay
+    // once. Dating the rearing investment from the return would erase the
+    // months in between.
+    const withReturn = [
+      ...changes,
+      { toStageId: LAYING, occurredOn: d('2027-11-01'), ageDays: 574 },
+    ];
+    expect(productionStartFrom(withReturn, [LAYING])!.occurredOn.toISOString()).toBe(
+      d('2026-08-25').toISOString(),
+    );
+  });
+
+  it('says nothing for a flock that has not got there', () => {
+    expect(productionStartFrom(changes.slice(0, 1), [LAYING])).toBeNull();
+  });
+
+  it('says nothing for a production type with no such stage — a broiler', () => {
+    // Nothing in this module knows what a laying hen is; it is told which
+    // stages count, and a broiler profile marks none of them.
+    expect(productionStartFrom(changes, [])).toBeNull();
+  });
+
+  it('ignores stage changes with no destination', () => {
+    expect(productionStartFrom([{ toStageId: null, occurredOn: d('2026-01-01'), ageDays: 1 }], [LAYING])).toBeNull();
+  });
+});
+
+describe('how old the pullet quote is', () => {
+  const asOf = d('2026-09-03');
+
+  it('counts the days since it was given', () => {
+    expect(priceAgeDays(d('2026-08-04'), asOf)).toBe(30);
+    expect(priceAgeDays(asOf, asOf)).toBe(0);
+  });
+
+  it('calls a quote older than a quarter stale', () => {
+    expect(priceIsStale(d('2026-08-04'), asOf)).toBe(false);
+    expect(priceIsStale(d('2026-05-01'), asOf)).toBe(true);
+    expect(PRICE_STALE_AFTER_DAYS).toBe(90);
+  });
+
+  it('does not go negative on a quote dated in the future', () => {
+    expect(priceAgeDays(d('2026-12-01'), asOf)).toBe(0);
+  });
+});
+
+describe('rear or buy', () => {
+  it('says rearing won, and by how much', () => {
+    // Reared at GHS 61.70 against a market pullet at GHS 75.00.
+    const c = rearOrBuy(6170, fromCedis(75))!;
+    expect(c.verdict).toBe('REARING_CHEAPER');
+    expect(c.differencePesewas).toBe(-1330);
+    expect(c.pctOfMarket).toBeCloseTo(-17.7, 1);
+  });
+
+  it('says buying won when it did', () => {
+    expect(rearOrBuy(6170, fromCedis(55))!.verdict).toBe('BUYING_CHEAPER');
+  });
+
+  it('says so when they are the same', () => {
+    expect(rearOrBuy(6170, 6170)!.verdict).toBe('THE_SAME');
+  });
+
+  it('REFUSES TO GUESS A MARKET PRICE', () => {
+    expect(rearOrBuy(6170, null)).toBeNull();
+  });
+
+  it('MULTIPLIES IT OUT ACROSS THE FLOCK, which is the number that lands', () => {
+    // GHS 13.30 a bird sounds small. GHS 12,502 does not.
+    const sentence = rearOrBuySentence(rearOrBuy(6170, fromCedis(75))!, 940);
+    expect(sentence).toMatch(/Rearing was cheaper by GHS 13\.30 a bird/);
+    expect(sentence).toMatch(/GHS 12,502\.00 across 940 pullets/);
+  });
+
+  it('does not congratulate the farm when buying would have won', () => {
+    const sentence = rearOrBuySentence(rearOrBuy(6170, fromCedis(55))!, 940);
+    expect(sentence).toMatch(/Buying was cheaper/);
+    expect(sentence).toMatch(/lost money/);
+  });
+
+  it('says neither when they match', () => {
+    expect(rearOrBuySentence(rearOrBuy(6170, 6170)!, 940)).toMatch(/either route is the same/i);
   });
 });
 

@@ -213,18 +213,23 @@ async function main() {
   });
 
   // Lifecycle for a layer reared from day-old.
+  //
+  // `productionStart` marks where the flock stops being an investment and starts
+  // being an asset that earns. It is a flag on the stage, not a key matched in
+  // code, so a future species can point it at "lactating" or "harvest" without
+  // anything in the costing layer knowing what a laying hen is.
   const stages = [
-    { key: 'brooding', name: 'Brooding', sequence: 1, start: 0, end: 28 },
-    { key: 'growing', name: 'Growing', sequence: 2, start: 29, end: 112 },
-    { key: 'pre_lay', name: 'Pre-lay', sequence: 3, start: 113, end: 133 },
-    { key: 'laying', name: 'Laying', sequence: 4, start: 134, end: 525 },
-    { key: 'depleting', name: 'Depleting', sequence: 5, start: 526, end: null },
+    { key: 'brooding', name: 'Brooding', sequence: 1, start: 0, end: 28, productionStart: false },
+    { key: 'growing', name: 'Growing', sequence: 2, start: 29, end: 112, productionStart: false },
+    { key: 'pre_lay', name: 'Pre-lay', sequence: 3, start: 113, end: 133, productionStart: false },
+    { key: 'laying', name: 'Laying', sequence: 4, start: 134, end: 525, productionStart: true },
+    { key: 'depleting', name: 'Depleting', sequence: 5, start: 526, end: null, productionStart: false },
   ];
 
   for (const s of stages) {
     await db.lifecycleStage.upsert({
       where: { productionTypeProfileId_key: { productionTypeProfileId: layer.id, key: s.key } },
-      update: { name: s.name, sequence: s.sequence },
+      update: { name: s.name, sequence: s.sequence, isProductionStart: s.productionStart },
       create: {
         productionTypeProfileId: layer.id,
         key: s.key,
@@ -232,6 +237,7 @@ async function main() {
         sequence: s.sequence,
         typicalStartAgeDays: s.start,
         typicalEndAgeDays: s.end,
+        isProductionStart: s.productionStart,
       },
     });
   }
