@@ -1,8 +1,10 @@
 import 'server-only';
 import { db } from '@/lib/db';
 import type { Principal } from '@/lib/rbac';
-import { orgFilter } from '@/lib/scope';
+import { orgFilter, siteFilter } from '@/lib/scope';
 import type { ParsedProgrammeItem } from '@/lib/health-programme';
+import { scheduleFor, needsAttention, type ScheduledEntry } from '@/lib/health-schedule';
+import { ageInDays } from '@/lib/metrics';
 
 /**
  * Health programme service — ADRAH Farms
@@ -159,4 +161,180 @@ export async function assignableProgrammes(principal: Principal) {
     orderBy: { name: 'asc' },
     select: { id: true, name: true, status: true, _count: { select: { items: true } } },
   });
+}
+
+// ---------------------------------------------------------------------------
+// WHAT IS DUE
+// ---------------------------------------------------------------------------
+
+export interface FlockScheduleView {
+  flock: {
+    id: string;
+    code: string;
+    houseName: string | null;
+    siteName: string;
+    dateOfHatch: Date;
+    ageDays: number;
+    closed: boolean;
+  };
+  programme: {
+    id: string;
+    name: string;
+    status: 'DRAFT' | 'APPROVED';
+    approvedByName: string | null;
+    approvedByRole: string | null;
+    approvedOn: Date | null;
+    sourceName: string | null;
+  } | null;
+  schedule: ScheduledEntry[];
+}
+
+/** One flock's schedule, with what has already been given ticked off. */
+export async function flockScheduleFor(
+  principal: Principal,
+  flockId: string,
+  asOf: Date = new Date(),
+): Promise<FlockScheduleView | null> {
+  const flock = await db.animalGroup.findFirst({
+    where: { id: flockId, site: orgFilter(principal) },
+    include: {
+      site: { select: { name: true } },
+      productionUnit: { select: { name: true } },
+      healthProgramme: { include: { items: { orderBy: [{ ageDays: 'asc' }, { sortOrder: 'asc' }] } } },
+      healthEvents: {
+        select: { programmeItemId: true, occurredOn: true, name: true },
+      },
+    },
+  });
+  if (!flock) return null;
+
+  const view: FlockScheduleView = {
+    flock: {
+      id: flock.id,
+      code: flock.code,
+      houseName: flock.productionUnit?.name ?? null,
+      siteName: flock.site.name,
+      dateOfHatch: flock.dateOfHatch,
+      ageDays: ageInDays(flock.dateOfHatch, asOf),
+      closed: flock.closedAt !== null,
+    },
+    programme: flock.healthProgramme
+      ? {
+          id: flock.healthProgramme.id,
+          name: flock.healthProgramme.name,
+          status: flock.healthProgramme.status,
+          approvedByName: flock.healthProgramme.approvedByName,
+          approvedByRole: flock.healthProgramme.approvedByRole,
+          approvedOn: flock.healthProgramme.approvedOn,
+          sourceName: flock.healthProgramme.sourceName,
+        }
+      : null,
+    schedule: [],
+  };
+
+  if (!flock.healthProgramme) return view;
+
+  view.schedule = scheduleFor(
+    flock.healthProgramme.items.map((i) => ({
+      id: i.id,
+      ageDays: i.ageDays,
+      windowDays: i.windowDays,
+      name: i.name,
+      sortOrder: i.sortOrder,
+    })),
+    flock.dateOfHatch,
+    flock.healthEvents,
+    asOf,
+    { closed: flock.closedAt !== null },
+  );
+
+  return view;
+}
+
+export interface DueEntry {
+  flockId: string;
+  flockCode: string;
+  houseName: string | null;
+  programmeName: string;
+  programmeStatus: 'DRAFT' | 'APPROVED';
+  entry: ScheduledEntry;
+}
+
+/**
+ * Everything due or overdue across every open flock this principal can see.
+ *
+ * TWO queries regardless of how many flocks there are. The scheduling itself is
+ * pure arithmetic done in memory — there is no sense asking Postgres to work out
+ * "hatch date plus fourteen days" when the answer depends on a window, a set of
+ * completions and today's date.
+ *
+ * CLOSED FLOCKS ARE EXCLUDED. A flock that has been sold cannot satisfy anything
+ * on its programme, and a permanent list of impossible overdue items is how
+ * people learn to stop reading the list.
+ */
+export async function dueAcrossFlocks(
+  principal: Principal,
+  asOf: Date = new Date(),
+  withinDays = 7,
+): Promise<DueEntry[]> {
+  const flocks = await db.animalGroup.findMany({
+    where: {
+      site: orgFilter(principal),
+      ...siteFilter(principal),
+      closedAt: null,
+      healthProgrammeId: { not: null },
+    },
+    include: {
+      productionUnit: { select: { name: true } },
+      healthProgramme: {
+        include: { items: { orderBy: [{ ageDays: 'asc' }, { sortOrder: 'asc' }] } },
+      },
+    },
+  });
+  if (flocks.length === 0) return [];
+
+  const events = await db.healthEvent.findMany({
+    where: { animalGroupId: { in: flocks.map((f) => f.id) } },
+    select: { animalGroupId: true, programmeItemId: true, occurredOn: true, name: true },
+  });
+
+  const eventsByFlock = new Map<string, typeof events>();
+  for (const e of events) {
+    const list = eventsByFlock.get(e.animalGroupId) ?? [];
+    list.push(e);
+    eventsByFlock.set(e.animalGroupId, list);
+  }
+
+  const due: DueEntry[] = [];
+  for (const flock of flocks) {
+    const programme = flock.healthProgramme;
+    if (!programme) continue;
+
+    const schedule = scheduleFor(
+      programme.items.map((i) => ({
+        id: i.id,
+        ageDays: i.ageDays,
+        windowDays: i.windowDays,
+        name: i.name,
+        sortOrder: i.sortOrder,
+      })),
+      flock.dateOfHatch,
+      eventsByFlock.get(flock.id) ?? [],
+      asOf,
+    );
+
+    for (const entry of needsAttention(schedule, withinDays)) {
+      due.push({
+        flockId: flock.id,
+        flockCode: flock.code,
+        houseName: flock.productionUnit?.name ?? null,
+        programmeName: programme.name,
+        programmeStatus: programme.status,
+        entry,
+      });
+    }
+  }
+
+  // Most overdue first, across every flock — the farm has one pair of hands.
+  return due.sort((a, b) => b.entry.daysFromDue - a.entry.daysFromDue);
 }

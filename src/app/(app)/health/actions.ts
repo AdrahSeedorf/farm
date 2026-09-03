@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { requirePermission } from '@/lib/session';
 import { recordAudit } from '@/lib/audit';
-import { orgFilter } from '@/lib/scope';
+import { canAccessSite, orgFilter } from '@/lib/scope';
 import { parseProgrammeTable, type ParsedProgrammeItem } from '@/lib/health-programme';
 import { importProgrammeItems, touchProgramme } from '@/lib/health-service';
 import {
@@ -15,6 +15,7 @@ import {
   programmeImportSchema,
 } from '@/lib/validation/health';
 import { fieldErrorsFrom } from '@/lib/validation/site';
+import { AuthorizationError } from '@/lib/rbac';
 import type { Warning } from '@/lib/warnings';
 
 export interface HealthFormState {
@@ -317,4 +318,60 @@ export async function revokeApproval(
   revalidatePath('/health');
   revalidatePath(`/health/${programmeId}`);
   return { ok: 'Approval withdrawn. The programme is back to draft.' };
+}
+
+/**
+ * Put a flock on a programme, or take it off one.
+ *
+ * Nothing is copied. The flock points at the programme, so a corrected schedule
+ * reaches every flock following it at once — which is the whole reason a vet
+ * sends a correction. The trade is that a flock's history is only readable
+ * alongside the programme as it stands today; the events themselves record what
+ * was actually given, so the record of what happened never moves.
+ */
+export async function assignProgramme(
+  flockId: string,
+  _prev: HealthFormState,
+  formData: FormData,
+): Promise<HealthFormState> {
+  const principal = await requirePermission('health:edit');
+
+  const flock = await db.animalGroup.findFirst({
+    where: { id: flockId, site: orgFilter(principal) },
+    select: { id: true, siteId: true, code: true, healthProgrammeId: true },
+  });
+  if (!flock) return { error: 'That flock no longer exists.' };
+  if (!canAccessSite(principal, flock.siteId)) {
+    throw new AuthorizationError('health:edit', flock.siteId);
+  }
+
+  const raw = formData.get('healthProgrammeId');
+  const programmeId = typeof raw === 'string' && raw !== '' ? raw : null;
+
+  if (programmeId) {
+    const programme = await db.healthProgramme.findFirst({
+      where: { id: programmeId, ...orgFilter(principal) },
+      select: { id: true, name: true },
+    });
+    if (!programme) return { error: 'That programme no longer exists.' };
+  }
+
+  await db.animalGroup.update({
+    where: { id: flockId },
+    data: { healthProgrammeId: programmeId },
+  });
+
+  await recordAudit({
+    principal,
+    action: 'healthProgramme.update',
+    entityType: 'AnimalGroup',
+    entityId: flockId,
+    before: { healthProgrammeId: flock.healthProgrammeId },
+    after: { healthProgrammeId: programmeId },
+  });
+
+  revalidatePath(`/flocks/${flockId}`);
+  revalidatePath(`/flocks/${flockId}/health`);
+  revalidatePath('/health');
+  return { ok: programmeId ? 'Programme assigned.' : 'Programme removed from this flock.' };
 }

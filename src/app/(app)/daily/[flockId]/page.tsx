@@ -9,6 +9,8 @@ import { dailyContextFor } from '@/lib/daily-service';
 import { reasonCodesFor, reasonLabel } from '@/lib/reason-codes';
 import { CHICK_BEHAVIOURS, LITTER_CONDITIONS, chickBehaviour, litterCondition } from '@/lib/rearing';
 import { uncostedNote } from '@/lib/feed-issue';
+import { flockScheduleFor } from '@/lib/health-service';
+import { scheduleSentence } from '@/lib/health-schedule';
 import { formatGHS, pesewas } from '@/lib/money';
 import { DailyForm } from '../DailyForm';
 import { saveDailyRecord } from '../actions';
@@ -41,6 +43,17 @@ export default async function DailyEntryPage({
    * onto the one screen a worker uses every morning makes the matrix decorative.
    */
   const canSeeCost = await currentUserCan('finance:view');
+
+  /**
+   * What this flock is due today, shown on the screen people actually open every
+   * morning. A reminder that lives only on a dashboard is a reminder seen by
+   * whoever looks at dashboards, which is not the person standing in the house.
+   */
+  const healthView = (await currentUserCan('health:view'))
+    ? await flockScheduleFor(principal, flockId, onDate)
+    : null;
+  const healthDue =
+    healthView?.schedule.filter((e) => e.status === 'DUE' || e.status === 'OVERDUE') ?? [];
 
   // Already done today — show what was recorded, read-only.
   if (context.existing) {
@@ -161,6 +174,46 @@ export default async function DailyEntryPage({
         {onDate.toISOString().slice(0, 10)}
       </p>
 
+
+      {healthDue.length > 0 ? (
+        <div
+          className={`mt-5 rounded-card border px-4 py-3.5 ${
+            healthDue.some((e) => e.status === 'OVERDUE')
+              ? 'border-status-critical bg-status-critical-bg'
+              : 'border-status-attention bg-status-attention-bg'
+          }`}
+        >
+          <p
+            className={`text-[13px] font-semibold uppercase tracking-[0.1em] ${
+              healthDue.some((e) => e.status === 'OVERDUE')
+                ? 'text-status-critical'
+                : 'text-status-attention'
+            }`}
+          >
+            Due for this flock
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {healthDue.map((e) => (
+              <li
+                key={e.item.id}
+                className={`text-[14px] ${
+                  e.status === 'OVERDUE'
+                    ? 'font-medium text-status-critical'
+                    : 'text-status-attention'
+                }`}
+              >
+                {e.item.name} — {scheduleSentence(e)}
+              </li>
+            ))}
+          </ul>
+          <Link
+            href={`/flocks/${flockId}/health`}
+            className="mt-2 inline-block text-[13px] font-semibold text-brand-primary"
+          >
+            Open the schedule
+          </Link>
+        </div>
+      ) : null}
       <div className="mt-6 rounded-card border border-border-default bg-surface-card p-5 sm:p-6">
         <DailyForm
           action={saveDailyRecord.bind(null, flockId)}

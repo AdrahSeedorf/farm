@@ -114,6 +114,12 @@ export default async function FlockPage({
           </p>
         </div>
         <Link
+          href={`/flocks/${flock.id}/health`}
+          className="inline-flex min-h-touch items-center rounded-control border border-border-strong bg-surface-card px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
+        >
+          Health
+        </Link>
+        <Link
           href={`/flocks/${flock.id}/weights`}
           className="inline-flex min-h-touch items-center rounded-control border border-border-strong bg-surface-card px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
         >

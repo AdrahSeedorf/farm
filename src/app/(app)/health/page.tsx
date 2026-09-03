@@ -2,8 +2,10 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { pageGuard, currentUserCan } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
-import { listProgrammes } from '@/lib/health-service';
+import { listProgrammes, dueAcrossFlocks } from '@/lib/health-service';
 import { StatusBadge } from './StatusBadge';
+import { StatusChip } from './ScheduleList';
+import { scheduleSentence } from '@/lib/health-schedule';
 
 export const metadata: Metadata = { title: 'Health' };
 
@@ -11,10 +13,13 @@ export default async function HealthPage() {
   const { principal, allowed } = await pageGuard('health:view');
   if (!allowed) return <Forbidden area="health records" roles={principal.roles} />;
 
-  const [programmes, canCreate] = await Promise.all([
+  const [programmes, due, canCreate] = await Promise.all([
     listProgrammes(principal),
+    dueAcrossFlocks(principal),
     currentUserCan('health:create'),
   ]);
+
+  const overdue = due.filter((d) => d.entry.status === 'OVERDUE');
 
   return (
     <main className="mx-auto max-w-4xl px-5 py-8">
@@ -34,6 +39,43 @@ export default async function HealthPage() {
           </Link>
         ) : null}
       </div>
+
+      {due.length > 0 ? (
+        <section className="mt-6 rounded-card border border-border-default bg-surface-card p-5 sm:p-6">
+          <h2 className="text-[12px] font-bold uppercase tracking-[0.14em] text-brand-accent">
+            Due now
+          </h2>
+          <p className="mt-2 text-[13px] text-text-secondary">
+            Across every open flock, most overdue first — the farm has one pair of hands.
+          </p>
+          <ul className="mt-4 divide-y divide-border-default">
+            {due.map((d) => (
+              <li
+                key={`${d.flockId}-${d.entry.item.id}`}
+                className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5"
+              >
+                <Link
+                  href={`/flocks/${d.flockId}/health`}
+                  className="text-[15px] font-semibold text-text-primary hover:text-brand-primary"
+                >
+                  {d.houseName ?? d.flockCode}
+                </Link>
+                <span className="text-[15px] text-text-primary">{d.entry.item.name}</span>
+                <StatusChip status={d.entry.status} />
+                <span className="w-full text-[13px] text-text-secondary sm:ml-auto sm:w-auto">
+                  {scheduleSentence(d.entry)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {overdue.length > 0 ? (
+            <p className="mt-3 border-t border-border-default pt-3 text-[13px] text-status-critical">
+              {overdue.length} of these {overdue.length === 1 ? 'is' : 'are'} past the window
+              the programme allows.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       <p className="mt-6 rounded-control border-l-2 border-brand-accent bg-surface-sunken px-4 py-3 text-[14px] text-text-secondary">
         <strong className="font-semibold text-text-primary">

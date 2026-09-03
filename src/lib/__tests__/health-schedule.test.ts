@@ -264,3 +264,57 @@ describe('date helpers', () => {
     expect(addDays(d('2026-08-30'), 5)).toEqual(d('2026-09-04'));
   });
 });
+
+describe('a whole flock’s week, end to end', () => {
+  /**
+   * The realistic shape: a programme with entries scattered through rearing, a
+   * flock part-way through it, and a handful of things already given. What the
+   * farm needs from this is a short list — not forty rows.
+   */
+  const programme: ProgrammeItem[] = [
+    { id: 'a', ageDays: 7, windowDays: 2, name: 'Entry A', sortOrder: 0 },
+    { id: 'b', ageDays: 14, windowDays: 2, name: 'Entry B', sortOrder: 0 },
+    { id: 'c', ageDays: 21, windowDays: 3, name: 'Entry C', sortOrder: 0 },
+    { id: 'd', ageDays: 35, windowDays: 2, name: 'Entry D', sortOrder: 0 },
+    { id: 'e', ageDays: 112, windowDays: 7, name: 'Entry E', sortOrder: 0 },
+  ];
+  const given: CompletedEvent[] = [
+    { programmeItemId: 'a', occurredOn: d('2026-08-08'), name: 'Entry A' },
+    { programmeItemId: 'b', occurredOn: d('2026-08-15'), name: 'Entry B' },
+  ];
+
+  // Hatched 1 August; today is the 26th, so the flock is 26 days old.
+  const schedule = scheduleFor(programme, hatch, given, d('2026-08-26'));
+
+  it('ticks off what was given', () => {
+    expect(schedule.filter((e) => e.status === 'DONE').map((e) => e.item.id)).toEqual(['a', 'b']);
+  });
+
+  it('marks the one that slipped past its window', () => {
+    // Due day 21 (22 August), window 3 -> still on time to the 25th, late on
+    // the 26th. Off by one here is the difference between a warning that fires
+    // a day early every time and one people trust.
+    expect(schedule.find((e) => e.item.id === 'c')!.status).toBe('OVERDUE');
+  });
+
+  it('leaves the rest upcoming', () => {
+    expect(schedule.find((e) => e.item.id === 'd')!.status).toBe('UPCOMING');
+    expect(schedule.find((e) => e.item.id === 'e')!.status).toBe('UPCOMING');
+  });
+
+  it('SHORTENS FORTY ROWS TO THE TWO THAT MATTER', () => {
+    // Entry D is due in ten days, past the week-long horizon, so it stays off
+    // the list. A list that includes everything is a list nobody reads.
+    const attention = needsAttention(schedule, 7);
+    expect(attention.map((e) => e.item.id)).toEqual(['c']);
+  });
+
+  it('widens when asked, for a fortnight’s planning', () => {
+    expect(needsAttention(schedule, 14).map((e) => e.item.id)).toEqual(['c', 'd']);
+  });
+
+  it('shows nothing at all once the flock is closed', () => {
+    const closed = scheduleFor(programme, hatch, given, d('2026-08-26'), { closed: true });
+    expect(needsAttention(closed)).toEqual([]);
+  });
+});

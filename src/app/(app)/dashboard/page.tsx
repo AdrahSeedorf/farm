@@ -12,6 +12,8 @@ import {
 } from '@/lib/metrics';
 import { splitIntoContainers, BASE_UNIT, formatQuantity } from '@/lib/uom';
 import { stockOverview } from '@/lib/stock-service';
+import { dueAcrossFlocks } from '@/lib/health-service';
+import { scheduleSentence } from '@/lib/health-schedule';
 
 export const metadata: Metadata = { title: 'Dashboard' };
 
@@ -47,10 +49,14 @@ export default async function DashboardPage() {
   const { principal, allowed } = await pageGuard('report:view');
   if (!allowed) return <Forbidden area="the farm dashboard" roles={principal.roles} />;
 
-  const [canSeeFinance, canSeeStock] = await Promise.all([
+  const [canSeeFinance, canSeeStock, canSeeHealth] = await Promise.all([
     currentUserCan('finance:view'),
     currentUserCan('inventory:view'),
+    currentUserCan('health:view'),
   ]);
+
+  const healthDue = canSeeHealth ? await dueAcrossFlocks(principal) : [];
+  const healthOverdue = healthDue.filter((d) => d.entry.status === 'OVERDUE');
 
   // Real figures, off the ledger. Empty for a role with no inventory access.
   const stock = canSeeStock ? await stockOverview(principal) : [];
@@ -142,10 +148,74 @@ export default async function DashboardPage() {
             status={needsOrdering.length > 0 ? 'attention' : undefined}
           />
         ) : null}
+        {canSeeHealth ? (
+          <KpiTile
+            label="Health due"
+            value={metric(healthDue.length)}
+            detail={
+              healthDue.length === 0
+                ? 'Nothing due this week'
+                : healthDue
+                    .slice(0, 2)
+                    .map((d) => d.entry.item.name)
+                    .join(', ')
+            }
+            status={
+              healthOverdue.length > 0
+                ? 'critical'
+                : healthDue.length > 0
+                  ? 'attention'
+                  : undefined
+            }
+          />
+        ) : null}
         {canSeeFinance ? (
           <KpiTile label="Sales today" value="GHS —" detail="Milestone 15" />
         ) : null}
       </div>
+
+      {healthDue.length > 0 ? (
+        <section className="mt-10 rounded-card border border-border-default bg-surface-card p-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 className="text-[12px] font-semibold uppercase tracking-[0.16em] text-brand-accent">
+              Health — due or overdue
+            </h2>
+            <Link href="/health" className="text-[14px] font-semibold text-brand-primary">
+              Open health
+            </Link>
+          </div>
+          <ul className="mt-4 divide-y divide-border-default">
+            {healthDue.slice(0, 8).map((d) => (
+              <li
+                key={`${d.flockId}-${d.entry.item.id}`}
+                className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2.5"
+              >
+                <Link
+                  href={`/flocks/${d.flockId}/health`}
+                  className="text-[15px] font-semibold text-text-primary hover:text-brand-primary"
+                >
+                  {d.houseName ?? d.flockCode}
+                </Link>
+                <span className="text-[15px] text-text-primary">{d.entry.item.name}</span>
+                <span
+                  className={`text-[14px] ${
+                    d.entry.status === 'OVERDUE'
+                      ? 'font-medium text-status-critical'
+                      : 'text-status-attention'
+                  }`}
+                >
+                  {scheduleSentence(d.entry)}
+                </span>
+                {d.programmeStatus === 'DRAFT' ? (
+                  <span className="ml-auto text-[12px] text-text-muted">
+                    {d.programmeName} · not vet-reviewed
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {canSeeStock && (needsOrdering.length > 0 || expired.length > 0 || expiring.length > 0) ? (
         <section className="mt-10 rounded-card border border-border-default bg-surface-card p-6">
