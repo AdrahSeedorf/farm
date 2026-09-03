@@ -52,6 +52,7 @@ model Organisation {
   auditLogs       AuditLog[]
   healthProgrammes HealthProgramme[]
   breeds          Breed[]
+  costAllocations CostAllocation[]
 }
 
 model Site {
@@ -351,14 +352,84 @@ model FlockCostEntry {
   description   String?
   sourceType    String?
   sourceId      String?
+
+  /// Set when this entry is one flock's share of a cost that covered several.
+  allocationId     String?
+  /// The weight this flock carried in that split — bird-days, birds, or 1.
+  ///
+  /// STORED, not recomputed. Bird-days depend on the population ledger, and a
+  /// mortality correction entered next month would change what the same
+  /// calculation returns today. The money was divided on the numbers that were
+  /// true when it was divided, and this is those numbers.
+  allocationWeight Float?
+
   recordedById  String
   createdAt     DateTime          @default(now())
 
-  animalGroup AnimalGroup @relation(fields: [animalGroupId], references: [id], onDelete: Cascade)
-  recordedBy  User        @relation(fields: [recordedById], references: [id])
+  animalGroup AnimalGroup     @relation(fields: [animalGroupId], references: [id], onDelete: Cascade)
+  recordedBy  User            @relation(fields: [recordedById], references: [id])
+  allocation  CostAllocation? @relation(fields: [allocationId], references: [id], onDelete: Cascade)
 
   @@index([animalGroupId, incurredOn])
   @@index([animalGroupId, category])
+  @@index([allocationId])
+}
+
+/// How a shared cost was divided between flocks. Every method is documented,
+/// with its formula, in src/lib/cost-allocation.ts.
+enum CostAllocationMethod {
+  BIRD_DAYS
+  HEADCOUNT
+  EQUAL
+  MANUAL
+}
+
+/// One real-world cost — a month's wages, an electricity bill, a truck hire —
+/// and how it was divided between flocks.
+///
+/// WHY THE DIVISION IS A RECORD AND NOT JUST ITS RESULT
+///   Six months from now, "why does this flock carry GHS 260 of July's
+///   electricity?" is a question somebody will ask, most likely while deciding
+///   whether rearing paid. Keeping only the seven cost entries the split
+///   produced makes that question unanswerable. Keeping the bill, the method
+///   and each flock's weight makes it arithmetic anyone can check.
+///
+/// NOTHING HERE IS EVER EDITED OR DELETED. A correction is a reversal — a new
+/// allocation carrying the negative of every entry — so the cost ledger keeps
+/// both the mistake and the fix, in the order they happened.
+model CostAllocation {
+  id             String               @id @default(cuid())
+  organisationId String
+  category       FlockCostCategory
+  /// INTEGER PESEWAS, the whole bill before it was divided. Negative on a reversal.
+  amountPesewas  Int
+  incurredOn     DateTime             @db.Date
+  description    String
+  method         CostAllocationMethod
+  /// The window a BIRD_DAYS split covers. Null for the other methods.
+  periodStart    DateTime?            @db.Date
+  periodEnd      DateTime?            @db.Date
+  /// Invoice or receipt number, so the paper and the record can be matched.
+  reference      String?
+
+  /// The allocation this one reverses.
+  ///
+  /// UNIQUE, so the database itself refuses to reverse the same cost twice —
+  /// a rule that is far better held by a constraint than by a check somewhere
+  /// in application code that a future route handler might forget to call.
+  reversesId     String?              @unique
+
+  recordedById   String
+  createdAt      DateTime             @default(now())
+
+  organisation Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  recordedBy   User             @relation(fields: [recordedById], references: [id])
+  reverses     CostAllocation?  @relation("CostAllocationReversal", fields: [reversesId], references: [id])
+  reversedBy   CostAllocation?  @relation("CostAllocationReversal")
+  entries      FlockCostEntry[]
+
+  @@index([organisationId, incurredOn])
+  @@index([organisationId, category])
 }
 
 // ---------------------------------------------------------------------------
@@ -905,6 +976,7 @@ model User {
   dailyRecords       DailyRecord[]
   verifiedRecords    DailyRecord[]      @relation("DailyRecordVerifier")
   healthEvents       HealthEvent[]
+  costAllocations    CostAllocation[]
   auditLogs          AuditLog[]
 
   createdAt DateTime @default(now())

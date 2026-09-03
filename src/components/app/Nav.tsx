@@ -15,6 +15,7 @@ const ITEMS: { href: string; label: string; permission: Permission }[] = [
   { href: '/flocks', label: 'Flocks', permission: 'flock:view' },
   { href: '/health', label: 'Health', permission: 'health:view' },
   { href: '/inventory', label: 'Store', permission: 'inventory:view' },
+  { href: '/costs', label: 'Costs', permission: 'finance:view' },
   { href: '/sites', label: 'Farms', permission: 'site:view' },
   { href: '/settings', label: 'Settings', permission: 'settings:view' },
 ];

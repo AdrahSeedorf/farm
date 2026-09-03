@@ -67,20 +67,47 @@ export function TextInput({
   );
 }
 
+/**
+ * A dropdown that survives a server action.
+ *
+ * THE BUG THIS EXISTS TO PREVENT — React 19 resets a form's DOM after a server
+ * action returns. Text inputs are restored from their controlled value, but a
+ * `<select>` is not: the element snaps back to its first option while the React
+ * state still holds what the person chose. Everything looks fine, because the
+ * state is right and only the DOM is wrong. Then the form is submitted again —
+ * which is exactly what a warn-and-confirm flow asks people to do — and the
+ * browser sends the FIRST OPTION instead of the choice. A feed cost confirmed
+ * on screen gets recorded as a chick cost.
+ *
+ * So a controlled Select does not carry its own name. The visible dropdown is
+ * for the person; a hidden input carrying the React value is what is submitted,
+ * and React does restore that. An uncontrolled Select (no `value` prop) keeps
+ * the name on the element itself, since there is no state for the DOM to
+ * disagree with.
+ */
 export function Select({
   error,
   children,
   ...props
 }: SelectHTMLAttributes<HTMLSelectElement> & { error?: string }) {
+  const controlled = props.value !== undefined;
+  const { name, ...rest } = props;
+
   return (
-    <select
-      {...props}
-      aria-invalid={error ? true : undefined}
-      aria-describedby={error ? `${props.id}-error` : undefined}
-      className={controlClass}
-    >
-      {children}
-    </select>
+    <>
+      <select
+        {...rest}
+        name={controlled ? undefined : name}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${props.id}-error` : undefined}
+        className={controlClass}
+      >
+        {children}
+      </select>
+      {controlled && name ? (
+        <input type="hidden" name={name} value={String(props.value ?? '')} />
+      ) : null}
+    </>
   );
 }
 
