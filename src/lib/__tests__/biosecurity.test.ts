@@ -14,29 +14,30 @@ import {
 } from '../biosecurity';
 
 const t = (iso: string) => new Date(iso);
+const at = (iso: string) => ({ kind: 'AT' as const, at: new Date(iso) });
 const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 
 describe('downtime between poultry farms', () => {
   const arrived = t('2026-09-04T08:00:00.000Z');
 
   it('measures the hours since the declared contact', () => {
-    const dt = downtimeFor(t('2026-09-02T08:00:00.000Z'), arrived, 48);
+    const dt = downtimeFor(at('2026-09-02T08:00:00.000Z'), arrived, 48);
     expect(dt.hoursSinceContact).toBe(48);
     expect(dt.status).toBe('PAST_DOWNTIME');
   });
 
   it('says how long is still to run', () => {
-    const dt = downtimeFor(t('2026-09-03T20:00:00.000Z'), arrived, 48);
+    const dt = downtimeFor(at('2026-09-03T20:00:00.000Z'), arrived, 48);
     expect(dt.status).toBe('WITHIN_DOWNTIME');
     expect(dt.hoursRemaining).toBe(36);
     expect(dt.clearsAt?.toISOString()).toBe('2026-09-05T20:00:00.000Z');
   });
 
   it('clears exactly on the hour the rule is met', () => {
-    expect(downtimeFor(t('2026-09-02T08:00:00.000Z'), arrived, 48).status).toBe(
+    expect(downtimeFor(at('2026-09-02T08:00:00.000Z'), arrived, 48).status).toBe(
       'PAST_DOWNTIME',
     );
-    expect(downtimeFor(t('2026-09-02T08:00:01.000Z'), arrived, 48).status).toBe(
+    expect(downtimeFor(at('2026-09-02T08:00:01.000Z'), arrived, 48).status).toBe(
       'WITHIN_DOWNTIME',
     );
   });
@@ -44,29 +45,38 @@ describe('downtime between poultry farms', () => {
   it('SHIPS NO DOWNTIME RULE OF ITS OWN', () => {
     // How long a farm asks for is a judgement about local disease pressure, the
     // season and who is visiting. It belongs to the farm and its vet.
-    const dt = downtimeFor(t('2026-09-02T08:00:00.000Z'), arrived, null);
+    const dt = downtimeFor(at('2026-09-02T08:00:00.000Z'), arrived, null);
     expect(dt.status).toBe('NO_RULE');
     expect(dt.clearsAt).toBeNull();
   });
 
   it('still reports the elapsed time when there is no rule', () => {
     // Reporting a fact is not the same as passing a judgement.
-    expect(downtimeFor(t('2026-09-02T08:00:00.000Z'), arrived, null).hoursSinceContact).toBe(48);
+    expect(downtimeFor(at('2026-09-02T08:00:00.000Z'), arrived, null).hoursSinceContact).toBe(48);
   });
 
   it('AN UNDECLARED CONTACT IS NOT A CLEARED ONE', () => {
     // A visitor who did not answer is an unknown. A visitor who answered and
     // cleared the rule is a known quantity. Collapsing the two is how an
     // unrecorded risk becomes an invisible one.
-    const dt = downtimeFor(null, arrived, 48);
+    const dt = downtimeFor({ kind: 'NOT_DECLARED' }, arrived, 48);
     expect(dt.status).toBe('NOT_DECLARED');
     expect(dt.status).not.toBe('PAST_DOWNTIME');
     expect(dt.hoursSinceContact).toBeNull();
   });
 
   it('treats a zero or negative rule as no rule at all', () => {
-    expect(downtimeFor(t('2026-09-02T08:00:00.000Z'), arrived, 0).status).toBe('NO_RULE');
-    expect(downtimeFor(t('2026-09-02T08:00:00.000Z'), arrived, -12).status).toBe('NO_RULE');
+    expect(downtimeFor(at('2026-09-02T08:00:00.000Z'), arrived, 0).status).toBe('NO_RULE');
+    expect(downtimeFor(at('2026-09-02T08:00:00.000Z'), arrived, -12).status).toBe('NO_RULE');
+  });
+
+  it('A DECLARATION OF NO CONTACT IS ITS OWN ANSWER', () => {
+    // Not "past downtime" — a different claim, by a different person. Six
+    // months from now the distinction is the whole value of the record.
+    const dt = downtimeFor({ kind: 'NONE' }, arrived, 48);
+    expect(dt.status).toBe('NO_CONTACT_DECLARED');
+    expect(dt.status).not.toBe('PAST_DOWNTIME');
+    expect(downtimeSentence(dt, 48)).toMatch(/recorded as declared/i);
   });
 
   it('counts hours between two moments', () => {
@@ -80,24 +90,24 @@ describe('what the visitor screen says', () => {
   it('NEVER TELLS ANYONE WHETHER THEY MAY ENTER', () => {
     // The software reports hours and rules. Who walks into a poultry house is
     // the farm manager's decision.
-    const inside = downtimeSentence(downtimeFor(t('2026-09-03T20:00:00.000Z'), arrived, 48), 48);
+    const inside = downtimeSentence(downtimeFor(at('2026-09-03T20:00:00.000Z'), arrived, 48), 48);
     expect(inside).not.toMatch(/should not|do not let|refuse|denied|not allowed/i);
     expect(inside).toMatch(/36 hours still to run/);
   });
 
   it('states the fact when the rule is met', () => {
-    const past = downtimeSentence(downtimeFor(t('2026-09-01T08:00:00.000Z'), arrived, 48), 48);
+    const past = downtimeSentence(downtimeFor(at('2026-09-01T08:00:00.000Z'), arrived, 48), 48);
     expect(past).toMatch(/past this farm's 48-hour downtime/);
   });
 
   it('says plainly that nothing can be measured without a rule', () => {
-    const none = downtimeSentence(downtimeFor(t('2026-09-02T08:00:00.000Z'), arrived, null), null);
+    const none = downtimeSentence(downtimeFor(at('2026-09-02T08:00:00.000Z'), arrived, null), null);
     expect(none).toMatch(/no downtime rule is set/i);
     expect(none).toMatch(/nothing here to measure that against|nothing to measure that against/i);
   });
 
   it('says plainly that nothing was declared', () => {
-    const undeclared = downtimeSentence(downtimeFor(null, arrived, 48), 48);
+    const undeclared = downtimeSentence(downtimeFor({ kind: 'NOT_DECLARED' }, arrived, 48), 48);
     expect(undeclared).toMatch(/did not say/i);
     expect(undeclared).toMatch(/nothing here can tell/i);
   });

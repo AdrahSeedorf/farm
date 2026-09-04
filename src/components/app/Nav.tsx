@@ -18,6 +18,7 @@ const ITEMS: { href: string; label: string; permission: Permission }[] = [
   // Labelled from the species profile below, not from this string. See productionLabel().
   { href: '/production', label: 'Production', permission: 'production:view' },
   { href: '/health', label: 'Health', permission: 'health:view' },
+  { href: '/biosecurity', label: 'Biosecurity', permission: 'biosecurity:view' },
   { href: '/inventory', label: 'Store', permission: 'inventory:view' },
   { href: '/costs', label: 'Costs', permission: 'finance:view' },
   { href: '/sites', label: 'Farms', permission: 'site:view' },

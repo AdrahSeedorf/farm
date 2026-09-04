@@ -82,11 +82,26 @@ model Site {
   longitude      Float?
   isActive       Boolean @default(true)
 
+  /// Hours a visitor should be clear of other poultry before entering here.
+  ///
+  /// NULLABLE, WITH NO DEFAULT SHIPPED. How long a farm asks for is a judgement
+  /// about local disease pressure, the season and who is visiting, and it
+  /// belongs to the farm and its veterinarian — not to software written in
+  /// advance of knowing any of that. Until it is set, the visitor log records
+  /// the declared elapsed time and passes no verdict at all.
+  ///
+  /// ON THE SITE, not the organisation, because it is a property of a PLACE.
+  /// A farm beside a live-bird market and one at the end of a track do not face
+  /// the same pressure, and the day this business runs two sites the shared
+  /// figure would be wrong for at least one of them.
+  visitorDowntimeHours Int?
+
   organisation    Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   productionUnits ProductionUnit[]
   animalGroups    AnimalGroup[]
   stockLocations  StockLocation[]
   userSiteScopes  UserSiteScope[]
+  visitorLogs     VisitorLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1219,6 +1234,7 @@ model User {
   verifiedRecords    DailyRecord[]      @relation("DailyRecordVerifier")
   healthEvents       HealthEvent[]
   costAllocations    CostAllocation[]
+  visitorLogs        VisitorLog[]
   productionRecords  ProductionRecord[]
   auditLogs          AuditLog[]
 
@@ -1330,4 +1346,93 @@ model AuditLog {
 
   @@index([organisationId, createdAt])
   @@index([entityType, entityId])
+}
+
+// ---------------------------------------------------------------------------
+// BIOSECURITY
+// Milestone 10. Who came in, what was cleaned, what an inspection found.
+// ---------------------------------------------------------------------------
+
+/// Why someone came. A controlled list so a year of visits can be counted by
+/// kind — "how often was a feed lorry on the site" is a question worth being
+/// able to answer, and free text never answers it.
+enum VisitorKind {
+  VETERINARIAN
+  SUPPLIER
+  BUYER
+  CONTRACTOR
+  INSPECTOR
+  /// Farm staff returning from elsewhere. They are visitors for this purpose.
+  STAFF_RETURNING
+  NEIGHBOUR
+  OTHER
+}
+
+/// What a visitor said about their last contact with other poultry.
+///
+/// THREE STATES, NOT A NULLABLE DATE. "No date" would have to stand for both
+/// "they have not been near poultry" and "nobody asked them" — two answers that
+/// mean opposite things. See ContactDeclaration in src/lib/biosecurity.ts.
+enum PoultryContactDeclaration {
+  /// Nobody asked, or they did not answer.
+  NOT_DECLARED
+  /// They said they have not been near other poultry.
+  NONE
+  /// They gave a date and time; see lastPoultryContactAt.
+  AT
+}
+
+/// Every person who came onto a site, and what they declared on the way in.
+///
+/// A RECORD OF DECLARATIONS, NOT OF FACTS. Everything a visitor says about
+/// where they have been is written down as having been said, not as having been
+/// verified — the software cannot know, and a record that pretends otherwise is
+/// worse than one that admits it.
+///
+/// Append-only in practice: a visit is never edited to change what was
+/// declared. Only `departedAt` is written afterwards, because signing out
+/// genuinely happens later than signing in.
+model VisitorLog {
+  id     String @id @default(cuid())
+  siteId String
+
+  name         String
+  organisation String?
+  /// E.164, e.g. +233241234567.
+  phone        String?
+  kind         VisitorKind
+  purpose      String?
+
+  arrivedAt  DateTime
+  departedAt DateTime?
+
+  declaration          PoultryContactDeclaration @default(NOT_DECLARED)
+  /// Set only when `declaration` is AT.
+  lastPoultryContactAt DateTime?
+
+  /// The rule in force AT THE TIME, stamped onto the row.
+  ///
+  /// Copied rather than read back from the site, for the same reason a health
+  /// event carries its own withdrawal period: changing the farm's downtime rule
+  /// next year must not silently rewrite what last year's visits are reported
+  /// to have complied with.
+  downtimeHoursAtEntry Int?
+
+  vehicleRegistration String?
+  /// Whether they went into a house where birds are, as opposed to the yard.
+  enteredProductionUnit Boolean @default(false)
+  /// Measures actually taken. Null means nobody recorded either way.
+  usedFootbath          Boolean?
+  woreFarmClothing      Boolean?
+
+  notes        String?
+  recordedById String
+
+  site       Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  recordedBy User @relation(fields: [recordedById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([siteId, arrivedAt])
+  @@index([siteId, departedAt])
 }

@@ -29,10 +29,26 @@ export type DowntimeStatus =
   | 'NO_RULE'
   /** The visitor did not say when they were last near other poultry. */
   | 'NOT_DECLARED'
+  /** They said they have not been near other poultry at all. */
+  | 'NO_CONTACT_DECLARED'
   /** Declared contact is more recent than the farm's own rule allows. */
   | 'WITHIN_DOWNTIME'
   /** Enough time has passed by the farm's own rule. */
   | 'PAST_DOWNTIME';
+
+/**
+ * What a visitor said about their last contact with other poultry.
+ *
+ * THREE STATES, NOT TWO. A nullable date can only say "a date" or "no date",
+ * and "no date" would have to stand for both "they have not been near poultry"
+ * and "nobody asked them" — two answers that mean opposite things. Modelling it
+ * as a nullable field would have quietly merged the safest declaration with the
+ * least informative one.
+ */
+export type ContactDeclaration =
+  | { kind: 'NOT_DECLARED' }
+  | { kind: 'NONE' }
+  | { kind: 'AT'; at: Date };
 
 export interface Downtime {
   status: DowntimeStatus;
@@ -66,14 +82,14 @@ export function hoursBetween(from: Date, to: Date): number {
  * one — the same distinction the stock ledger draws between UNTRACKED and OK.
  */
 export function downtimeFor(
-  lastPoultryContact: Date | null,
+  declaration: ContactDeclaration,
   arrivedAt: Date,
   downtimeHours: number | null,
 ): Downtime {
-  const declared = lastPoultryContact !== null;
   const hasRule = downtimeHours !== null && Number.isFinite(downtimeHours) && downtimeHours > 0;
 
-  const hoursSinceContact = declared ? hoursBetween(lastPoultryContact, arrivedAt) : null;
+  const hoursSinceContact =
+    declaration.kind === 'AT' ? hoursBetween(declaration.at, arrivedAt) : null;
 
   if (!hasRule) {
     return {
@@ -84,7 +100,20 @@ export function downtimeFor(
     };
   }
 
-  if (!declared) {
+  // A declaration of no contact clears the downtime question outright, and is
+  // reported as its own thing rather than as "past downtime". It is a different
+  // claim, made by a different person, and six months from now the distinction
+  // is the whole value of having written it down.
+  if (declaration.kind === 'NONE') {
+    return {
+      status: 'NO_CONTACT_DECLARED',
+      hoursSinceContact: null,
+      clearsAt: null,
+      hoursRemaining: null,
+    };
+  }
+
+  if (declaration.kind === 'NOT_DECLARED') {
     return {
       status: 'NOT_DECLARED',
       hoursSinceContact: null,
@@ -93,7 +122,7 @@ export function downtimeFor(
     };
   }
 
-  const clearsAt = new Date(lastPoultryContact.getTime() + downtimeHours * MS_PER_HOUR);
+  const clearsAt = new Date(declaration.at.getTime() + downtimeHours * MS_PER_HOUR);
   const remaining = hoursBetween(arrivedAt, clearsAt);
 
   return remaining > 0
@@ -127,6 +156,9 @@ export function downtimeSentence(downtime: Downtime, downtimeHours: number | nul
         `They did not say when they were last near other poultry. This farm asks for ` +
         `${downtimeHours} hours, and nothing here can tell whether that has passed.`
       );
+
+    case 'NO_CONTACT_DECLARED':
+      return 'They said they have not been near other poultry. Recorded as declared.';
 
     case 'WITHIN_DOWNTIME':
       return (
