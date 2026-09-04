@@ -1,4 +1,5 @@
 import 'server-only';
+import type { Prisma } from '@/generated/prisma/client';
 import { db } from '@/lib/db';
 import type { Principal } from '@/lib/rbac';
 import { orgFilter, siteFilter } from '@/lib/scope';
@@ -23,9 +24,20 @@ import {
   type LayStandard,
   type OutputLine,
 } from '@/lib/production';
+import { BASE_UNIT } from '@/lib/uom';
 import { populationSeries, type PopulationEvent } from '@/lib/ledger';
 import { populationsFor } from '@/lib/flock-service';
 import { assertSaleAllowed, flockWithdrawals, WithdrawalError } from '@/lib/withdrawal-service';
+import { recordMovementWithin, StockMovementError } from '@/lib/stock-movements';
+import {
+  planProductionStock,
+  stockNote,
+  reverseOf,
+  type StockableGrade,
+  type ProductionStore,
+  type StockPlan,
+  type PostedMovement,
+} from '@/lib/production-stock';
 import type { CollectionInput, ParsedGradeLine } from '@/lib/validation/production';
 
 /**
@@ -99,6 +111,15 @@ export interface ProductionContext {
   standardHenDayPct: number | null;
   /** Grades currently offered, in the farm's own order. */
   grades: (Grade & { id: string })[];
+  /**
+   * The same grades, with whatever stock item each is held as.
+   *
+   * Kept apart from `grades` so the collection screen — which cares only about
+   * what to count — is not carrying the store's business around with it.
+   */
+  stockableGrades: StockableGrade[];
+  /** Where this farm's produce goes. Null when no store is flagged for it. */
+  store: ProductionStore | null;
   /** What has already been recorded for this date. */
   today: {
     collections: RecordedCollection[];
@@ -139,6 +160,17 @@ export async function productionContextFor(
           productionGrades: {
             where: { isActive: true },
             orderBy: { sortOrder: 'asc' },
+            include: {
+              item: {
+                select: {
+                  id: true,
+                  name: true,
+                  isActive: true,
+                  shelfLifeDays: true,
+                  stockUom: { select: { key: true, dimension: true } },
+                },
+              },
+            },
           },
         },
       },
@@ -146,7 +178,7 @@ export async function productionContextFor(
   });
   if (!flock) return null;
 
-  const [populationRow, todayRecords, previousRecord, withdrawal] = await Promise.all([
+  const [populationRow, todayRecords, previousRecord, withdrawal, store] = await Promise.all([
     db.animalGroupEvent.aggregate({
       where: { animalGroupId: flockId },
       _sum: { delta: true },
@@ -158,6 +190,15 @@ export async function productionContextFor(
       select: { onDate: true },
     }),
     flockWithdrawals(principal, flockId, onDate),
+    // ONE STORE PER SITE RECEIVES PRODUCE, and it is a flag rather than a
+    // question on the form. Somebody walking a house with a tray in one hand
+    // should not be asked which building the eggs are going to; they are going
+    // where they always go.
+    db.stockLocation.findFirst({
+      where: { siteId: flock.siteId, receivesProduction: true, isActive: true },
+      select: { id: true, name: true },
+      orderBy: { code: 'asc' },
+    }),
   ]);
 
   const previous = previousRecord
@@ -195,6 +236,24 @@ export async function productionContextFor(
       isSaleable: g.isSaleable,
       sortOrder: g.sortOrder,
     })),
+    stockableGrades: flock.productionType.productionGrades.map((g) => ({
+      gradeId: g.id,
+      gradeName: g.name,
+      itemId: g.item?.id ?? null,
+      itemName: g.item?.name ?? null,
+      // THE DIMENSION'S BASE UNIT, not the item's display unit.
+      //
+      // A production line's quantity is already in the base unit — pieces for
+      // eggs. The item's `stockUom` is what the storekeeper prefers to READ,
+      // which for eggs is very often the crate. Passing that as the unit the
+      // quantity is expressed in told the stock layer that 240 pieces were 240
+      // crates, and it dutifully banked 7,200 eggs. Caught by the browser
+      // suite, which counted what the store said it held.
+      itemBaseUnit: g.item ? BASE_UNIT[g.item.stockUom.dimension] : null,
+      itemIsActive: g.item?.isActive ?? false,
+      shelfLifeDays: g.item?.shelfLifeDays ?? null,
+    })),
+    store,
     today: {
       collections: todayRecords,
       total: totalRecorded(todayRecords),
@@ -285,7 +344,18 @@ function capabilityEnabled(capabilities: unknown, key: string): boolean {
 // ---------------------------------------------------------------------------
 
 export type SubmitCollectionResult =
-  | { status: 'saved'; recordId: string; sequence: number }
+  | {
+      status: 'saved';
+      recordId: string;
+      sequence: number;
+      /**
+       * What happened in the store, said in words — including when the answer
+       * is "nothing, because…". Shown every time. Somebody who has just
+       * recorded 340 eggs and hears nothing about the store cannot tell the
+       * difference between produce going in and silently not going in.
+       */
+      stockNote: string;
+    }
   | { status: 'needsConfirmation'; warnings: Warning[]; token: string }
   | { status: 'error'; message: string };
 
@@ -369,7 +439,12 @@ export async function submitCollection(
 
   try {
     const record = await writeCollection(principal, context, input, warnings);
-    return { status: 'saved', recordId: record.id, sequence: record.sequence };
+    return {
+      status: 'saved',
+      recordId: record.id,
+      sequence: record.sequence,
+      stockNote: record.stockNote,
+    };
   } catch (error) {
     if (error instanceof ProductionError) return { status: 'error', message: error.message };
     if (isUniqueViolation(error)) {
@@ -396,7 +471,20 @@ async function writeCollection(
   context: ProductionContext,
   input: SubmitCollectionInput,
   warnings: Warning[],
-): Promise<{ id: string; sequence: number }> {
+): Promise<{ id: string; sequence: number; stockNote: string }> {
+  // Decided BEFORE the transaction, from rows already read. Everything that
+  // could make produce not reach the store — no store flagged, no grade linked,
+  // a collection that was destroyed rather than sold — is answered here as a
+  // sentence rather than left to throw inside the write and take the collection
+  // down with it.
+  const plan = planProductionStock({
+    flockCode: context.code,
+    onDate: input.onDate,
+    disposition: input.disposition,
+    lines: input.lines.map((l) => ({ gradeId: l.gradeId, quantityBase: l.quantityBase })),
+    grades: context.stockableGrades,
+    store: context.store,
+  });
   const attempt = () =>
     db.$transaction(async (tx) => {
       const highest = await tx.productionRecord.aggregate({
@@ -439,6 +527,8 @@ async function writeCollection(
         select: { id: true, sequence: true },
       });
 
+      await postProductionStock(tx, principal, plan, record.id, input.onDate);
+
       return record;
     });
 
@@ -447,11 +537,61 @@ async function writeCollection(
   // still free after a failed insert, so a retry cannot duplicate anything.
   for (let tries = 0; ; tries++) {
     try {
-      return await attempt();
+      const record = await attempt();
+      return { ...record, stockNote: stockNote(plan, context.words.production) };
     } catch (error) {
       if (tries < 2 && isSequenceCollision(error)) continue;
       throw error;
     }
+  }
+}
+
+/**
+ * Put the planned produce into the store, inside the collection's transaction.
+ *
+ * ONE TRANSACTION, ON PURPOSE. A collection that saved while its stock movement
+ * failed would leave the store quietly short by a day's eggs, with nothing on
+ * either screen saying so — and the discrepancy would only surface weeks later
+ * when somebody counted the room. Either both rows exist or neither does.
+ *
+ * The batch is looked up by number first and passed by id when it is found, so
+ * the second collection of a day appends to the morning's batch instead of
+ * meeting the receipt layer's refusal to reuse a batch number with a different
+ * expiry. Every collection of one day shares one batch; see batchNumberFor.
+ */
+async function postProductionStock(
+  tx: Prisma.TransactionClient,
+  principal: Principal,
+  plan: StockPlan,
+  recordId: string,
+  onDate: Date,
+): Promise<void> {
+  if (plan.status !== 'planned') return;
+
+  for (const line of plan.lines) {
+    const existing = await tx.itemBatch.findFirst({
+      where: { itemId: line.itemId, batchNumber: plan.batchNumber },
+      select: { id: true },
+    });
+
+    await recordMovementWithin(tx, principal, {
+      itemId: line.itemId,
+      stockLocationId: plan.storeId,
+      type: 'PRODUCTION',
+      quantityEntered: line.quantityBase,
+      enteredUomKey: line.unitKey,
+      occurredOn: onDate,
+      // Exactly one of these. A batch that exists is joined by id; a new one is
+      // created with the day's expiry.
+      itemBatchId: existing?.id ?? null,
+      batchNumber: existing ? null : plan.batchNumber,
+      expiresOn: existing ? null : plan.expiresOn,
+      // NO PRICE. See PRODUCE_ENTERS_UNCOSTED in production-stock.ts — there is
+      // no honest cost for an egg on the morning it is laid.
+      notes: `${line.gradeName} collected`,
+      sourceType: 'productionRecord',
+      sourceId: recordId,
+    });
   }
 }
 
@@ -474,7 +614,15 @@ export async function correctCollection(
   principal: Principal,
   recordId: string,
   reason: string,
-): Promise<{ status: 'saved'; recordId: string } | { status: 'error'; message: string }> {
+): Promise<
+  | {
+      status: 'saved';
+      recordId: string;
+      /** Set only when the store could not be put back — see below. */
+      stockNote?: string;
+    }
+  | { status: 'error'; message: string }
+> {
   const original = await db.productionRecord.findFirst({
     where: { id: recordId, animalGroup: { site: orgFilter(principal) } },
     include: { lines: true, correctedBy: { select: { id: true } } },
@@ -491,6 +639,24 @@ export async function correctCollection(
     return { status: 'error', message: 'That collection has already been corrected.' };
   }
 
+  // What actually went into the store when this collection was recorded. Read
+  // rather than recomputed: a grade unlinked from its item since, or a shelf
+  // life changed since, would make a fresh calculation disagree with what is
+  // sitting in the room. A reversal that does not exactly cancel is worse than
+  // none. Same rule as a reversed cost allocation.
+  const posted = await db.stockMovement.findMany({
+    where: { sourceType: 'productionRecord', sourceId: original.id },
+    select: {
+      itemId: true,
+      itemBatchId: true,
+      stockLocationId: true,
+      deltaBase: true,
+      item: { select: { stockUom: { select: { dimension: true } } } },
+    },
+  });
+
+  let stockProblem: string | null = null;
+
   try {
     const reversal = await db.$transaction(async (tx) => {
       const highest = await tx.productionRecord.aggregate({
@@ -498,7 +664,7 @@ export async function correctCollection(
         _max: { sequence: true },
       });
 
-      return tx.productionRecord.create({
+      const created = await tx.productionRecord.create({
         data: {
           animalGroupId: original.animalGroupId,
           productionUnitId: original.productionUnitId,
@@ -527,15 +693,109 @@ export async function correctCollection(
         },
         select: { id: true },
       });
+
+      const problem = await unpostProductionStock(
+        tx,
+        principal,
+        posted.map((m) => ({
+          itemId: m.itemId,
+          itemBatchId: m.itemBatchId,
+          stockLocationId: m.stockLocationId,
+          deltaBase: m.deltaBase,
+          // The DIMENSION's base unit, matching the units deltaBase is stored
+          // in. The item's own stockUom is a display preference — for eggs it
+          // is usually the crate, and passing it here asks the store for
+          // thirty times what went in.
+          unitKey: BASE_UNIT[m.item.stockUom.dimension],
+        })),
+        created.id,
+        original.onDate,
+        reason,
+      );
+
+      // PERSISTED, NOT FLASHED. The correction form disappears the moment the
+      // collection shows as corrected, taking any message with it — and "the
+      // store could not be put back" is precisely the sentence that must
+      // survive a page refresh, because somebody has to act on it later. It
+      // goes onto the reversal's own notes, where it sits under that row for
+      // as long as the record exists.
+      if (problem) {
+        stockProblem = problem;
+        await tx.productionRecord.update({
+          where: { id: created.id },
+          data: { notes: `${reason} — ${problem}` },
+        });
+      }
+
+      return created;
     });
 
-    return { status: 'saved', recordId: reversal.id };
+    return { status: 'saved', recordId: reversal.id, stockNote: stockProblem ?? undefined };
   } catch (error) {
     if (isUniqueViolation(error)) {
       return { status: 'error', message: 'That collection has already been corrected.' };
     }
     throw error;
   }
+}
+
+/**
+ * Take corrected produce back out of the store.
+ *
+ * An ADJUSTMENT rather than a negative PRODUCTION, because that is what it is:
+ * the eggs were never there in the number first recorded. It comes out of the
+ * SAME BATCH it went into, so first-expiry-first-out keeps working and the
+ * batch's history reads as one story rather than two unrelated ones.
+ */
+async function unpostProductionStock(
+  tx: Prisma.TransactionClient,
+  principal: Principal,
+  posted: PostedMovement[],
+  reversalRecordId: string,
+  onDate: Date,
+  reason: string,
+): Promise<string | null> {
+  const refused: string[] = [];
+
+  for (const movement of reverseOf(posted)) {
+    try {
+      await recordMovementWithin(tx, principal, {
+      itemId: movement.itemId,
+      stockLocationId: movement.stockLocationId,
+      type: 'ADJUSTMENT',
+      // Already signed by reverseOf. ADJUSTMENT is the one movement type that
+      // takes a signed quantity — see stockDeltaFor.
+      quantityEntered: movement.deltaBase,
+      enteredUomKey: movement.unitKey,
+      occurredOn: onDate,
+      itemBatchId: movement.itemBatchId,
+      reasonCode: 'recount_correction',
+      notes: `Collection corrected: ${reason}`,
+        sourceType: 'productionRecord',
+        sourceId: reversalRecordId,
+      });
+    } catch (error) {
+      // THE CORRECTION IS NOT ABANDONED BECAUSE THE STORE CANNOT COMPLY.
+      //
+      // If the eggs have already been sold, the store has nothing to give back
+      // and the ledger will not go negative — both correct. Refusing the whole
+      // correction would leave the production figures permanently wrong to
+      // protect a stock figure that is already right. So the record is
+      // corrected, and the person is told, in words, what to do about the
+      // store.
+      if (error instanceof StockMovementError) {
+        refused.push(error.message);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  if (refused.length === 0) return null;
+  return (
+    `The collection is corrected, but the store could not be adjusted to match: ` +
+    `${refused.join(' ')} Adjust it by hand once you have checked what happened to the produce.`
+  );
 }
 
 // ---------------------------------------------------------------------------

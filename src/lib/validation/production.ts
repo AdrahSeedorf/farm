@@ -44,6 +44,18 @@ export const productionGradeSchema = z
       .transform((v) => v === 'true'),
     minGrams: optionalGrams,
     maxGrams: optionalGrams,
+    /**
+     * The store item this grade is held as. Blank is the ordinary answer.
+     *
+     * A grade with no item is still collected, counted and graded — it simply
+     * never becomes something with a quantity on hand. Cracked and floor eggs
+     * usually never will be.
+     */
+    itemId: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v) => (v === undefined || v === '' ? null : v)),
   })
   .refine(
     (g) => g.minGrams === null || g.maxGrams === null || g.minGrams < g.maxGrams,

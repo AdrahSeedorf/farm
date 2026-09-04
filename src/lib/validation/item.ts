@@ -208,6 +208,23 @@ export const itemSchema = z
     reorderLevel: threshold,
     minimumStock: threshold,
     isPerishable: checkbox,
+    /**
+     * How long the item keeps after it is produced or received.
+     *
+     * DATES A BATCH, NEVER REFUSES ONE. Blank means nobody has stated a figure,
+     * and no default is shipped: how long an egg keeps depends on whether it was
+     * washed, how it is stored and how hot the room is. A batch with no expiry
+     * reports none, which is honest; a guessed one would be trusted.
+     */
+    shelfLifeDays: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v) => (v === undefined || v === '' ? null : Number(v)))
+      .refine(
+        (v) => v === null || (Number.isInteger(v) && v > 0 && v <= 3650),
+        'Enter a whole number of days, or leave it blank.',
+      ),
   })
   .refine(
     (v) => v.minimumStock === null || v.reorderLevel === null || v.reorderLevel >= v.minimumStock,

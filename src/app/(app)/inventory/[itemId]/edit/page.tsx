@@ -57,6 +57,7 @@ export default async function EditItemPage({
             minimumStock:
               item.minimumStock === null ? null : fromBase(item.minimumStock, item.stockUom.key),
             isPerishable: item.isPerishable,
+            shelfLifeDays: item.shelfLifeDays,
           }}
           lockedDimension={movements > 0 ? item.stockUom.dimension : undefined}
           submitLabel="Save changes"

@@ -587,6 +587,17 @@ model ProductionGrade {
   /// silently accepting kilograms of eggs.
   baseUomId String
 
+  /// The stock item this grade is held as, once the farm chooses to hold it.
+  ///
+  /// NULL IS THE ORDINARY CASE AND IS NOT A GAP. A grade that is not held as
+  /// stock is still recorded, still counted and still graded — it simply does
+  /// not become something with a quantity on hand. Cracked and floor eggs
+  /// usually never will be.
+  ///
+  /// UNIQUE, so two grades cannot point at the same item. They would each add
+  /// their eggs to it, and the store would hold twice what the farm collected.
+  itemId    String? @unique
+
   /// Fixed display order. Grades read in the same places every day, so a change
   /// in the shape of a collection is visible at a glance.
   sortOrder Int     @default(0)
@@ -596,6 +607,7 @@ model ProductionGrade {
 
   productionType ProductionTypeProfile @relation(fields: [productionTypeProfileId], references: [id], onDelete: Cascade)
   baseUom        UnitOfMeasure         @relation(fields: [baseUomId], references: [id])
+  item           Item?                 @relation(fields: [itemId], references: [id])
   lines          ProductionLine[]
 
   createdAt DateTime @default(now())
@@ -778,6 +790,13 @@ model Item {
   reorderLevel   Float?
   minimumStock   Float?
   isPerishable   Boolean      @default(false)
+  /// How many days after it is produced or received this item keeps.
+  ///
+  /// USED TO DATE A BATCH, never to refuse one. Null means nobody has stated a
+  /// figure — and no default is shipped, because how long an egg keeps depends
+  /// on whether it is washed, how it is stored and how hot the room is, none of
+  /// which this software knows. A batch with no expiry date simply reports none.
+  shelfLifeDays  Int?
   isActive       Boolean      @default(true)
 
   organisation Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
@@ -786,6 +805,7 @@ model Item {
   movements    StockMovement[]
   programmeItems HealthProgrammeItem[]
   healthEvents   HealthEvent[]
+  productionGrade ProductionGrade?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -821,6 +841,16 @@ model StockLocation {
   name     String
   code     String
   isActive Boolean @default(true)
+
+  /// Where this site's produce goes when it is recorded.
+  ///
+  /// A FLAG RATHER THAN A QUESTION ON THE COLLECTION FORM. Somebody walking a
+  /// house with a tray in one hand should not be asked which building the eggs
+  /// are going to; they are going where they always go. A site with no store
+  /// flagged simply records the collection and puts nothing into stock, and the
+  /// screen says so — setting up a store is never a precondition for writing
+  /// down what was collected.
+  receivesProduction Boolean @default(false)
 
   site      Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
   movements StockMovement[]

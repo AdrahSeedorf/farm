@@ -13,7 +13,10 @@ interface Props {
     isSaleable: boolean;
     minGrams: number | null;
     maxGrams: number | null;
+    itemId: string | null;
   };
+  /** Store items this grade could be held as, plus whichever it already is. */
+  items: { id: string; name: string; sku: string }[];
   submitLabel: string;
   idPrefix: string;
 }
@@ -41,7 +44,7 @@ function Submit({ label }: { label: string }) {
  * with the software would be trusted, and eggs would be sorted to a line nobody
  * here chose.
  */
-export function GradeForm({ action, defaults, submitLabel, idPrefix }: Props) {
+export function GradeForm({ action, defaults, items, submitLabel, idPrefix }: Props) {
   const [state, formAction] = useActionState(action, {} as FormState);
   const e = state.fieldErrors ?? {};
 
@@ -50,6 +53,7 @@ export function GradeForm({ action, defaults, submitLabel, idPrefix }: Props) {
     isSaleable: String(defaults?.isSaleable ?? true),
     minGrams: defaults?.minGrams === null || defaults === undefined ? '' : String(defaults.minGrams),
     maxGrams: defaults?.maxGrams === null || defaults === undefined ? '' : String(defaults.maxGrams),
+    itemId: defaults?.itemId ?? '',
   });
   const set = (key: keyof typeof values) => (v: string) =>
     setValues((prev) => ({ ...prev, [key]: v }));
@@ -128,6 +132,34 @@ export function GradeForm({ action, defaults, submitLabel, idPrefix }: Props) {
           />
         </Field>
       </div>
+
+      {/*
+        The link that turns a collection into stock. Left blank by default and
+        described as optional, because a farm that has not set up store items
+        yet must still be able to record what it collected — and cracked eggs
+        will never want one at all.
+      */}
+      <Field
+        label="Held in the store as"
+        htmlFor={`${idPrefix}-item`}
+        hint="Choose an item and collections of this grade are added to the store automatically. Leave it blank and the grade is still recorded and counted, it simply does not become stock."
+        error={e.itemId}
+      >
+        <Select
+          id={`${idPrefix}-item`}
+          name="itemId"
+          value={values.itemId}
+          onChange={(ev) => set('itemId')(ev.target.value)}
+          error={e.itemId}
+        >
+          <option value="">Not held as stock</option>
+          {items.map((i) => (
+            <option key={i.id} value={i.id}>
+              {i.name} ({i.sku})
+            </option>
+          ))}
+        </Select>
+      </Field>
 
       <Submit label={submitLabel} />
     </form>

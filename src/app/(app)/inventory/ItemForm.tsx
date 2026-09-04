@@ -26,6 +26,7 @@ interface ItemFormProps {
     reorderLevel?: number | null;
     minimumStock?: number | null;
     isPerishable?: boolean;
+    shelfLifeDays?: number | null;
   };
   /** Set when the item already has movements — the dimension is then fixed. */
   lockedDimension?: string;
@@ -85,6 +86,11 @@ export function ItemForm({
     defaults.minimumStock === null || defaults.minimumStock === undefined
       ? ''
       : String(defaults.minimumStock),
+  );
+  const [shelfLifeDays, setShelfLifeDays] = useState(
+    defaults.shelfLifeDays === null || defaults.shelfLifeDays === undefined
+      ? ''
+      : String(defaults.shelfLifeDays),
   );
   const [isPerishable, setIsPerishable] = useState(
     defaults.isPerishable ?? CATEGORY_META[initialCategory].perishableByDefault,
@@ -279,6 +285,30 @@ export function ItemForm({
           </span>
         </span>
       </label>
+
+      {isPerishable ? (
+        <Field
+          label="Shelf life"
+          htmlFor="shelfLifeDays"
+          hint="Days from the day it is received or collected. Used to date a batch — never to refuse one. Leave it blank and batches carry no expiry rather than a guessed one."
+          error={e.shelfLifeDays}
+        >
+          <TextInput
+            id="shelfLifeDays"
+            name="shelfLifeDays"
+            type="number"
+            inputMode="numeric"
+            min="1"
+            max="3650"
+            value={shelfLifeDays}
+            onChange={(ev) => setShelfLifeDays(ev.target.value)}
+            placeholder="—"
+            error={e.shelfLifeDays}
+          />
+        </Field>
+      ) : (
+        <input type="hidden" name="shelfLifeDays" value="" />
+      )}
 
       <div className="flex items-center gap-3 pt-1">
         <Submit label={submitLabel} />

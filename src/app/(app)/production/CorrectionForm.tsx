@@ -68,6 +68,24 @@ export function CorrectionForm({
           {state.error}
         </p>
       ) : null}
+      {/*
+        What happened in the store, said out loud. Usually "put back as it was";
+        occasionally the store could not comply — the produce has already been
+        sold — and then this is the only place anybody learns that the two
+        ledgers need reconciling by hand.
+      */}
+      {state.saved?.stock ? (
+        <p
+          role="status"
+          className={`text-[13px] ${
+            /could not/i.test(state.saved.stock)
+              ? 'font-medium text-status-attention'
+              : 'text-text-secondary'
+          }`}
+        >
+          Correction recorded. {state.saved.stock}
+        </p>
+      ) : null}
       <p className="text-[13px] text-text-muted">
         This adds a reversing entry. The original stays where it is, and both remain on the
         record.

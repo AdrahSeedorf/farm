@@ -77,6 +77,7 @@ export async function createItem(_prev: FormState, formData: FormData): Promise<
         reorderLevel: toBaseOrNull(input.reorderLevel, unit.key),
         minimumStock: toBaseOrNull(input.minimumStock, unit.key),
         isPerishable: input.isPerishable,
+        shelfLifeDays: input.shelfLifeDays,
       },
     });
     itemId = item.id;
@@ -141,6 +142,7 @@ export async function updateItem(
         reorderLevel: toBaseOrNull(input.reorderLevel, unit.key),
         minimumStock: toBaseOrNull(input.minimumStock, unit.key),
         isPerishable: input.isPerishable,
+        shelfLifeDays: input.shelfLifeDays,
       },
     });
     await recordAudit({
@@ -384,4 +386,65 @@ function movementScopeFor(principal: Parameters<typeof orgFilter>[0]) {
         : { ...orgFilter(principal), ...siteIdFilter(principal) },
     },
   };
+}
+
+/**
+ * Choose which store a farm's produce goes into.
+ *
+ * ONE PER FARM, enforced by clearing the others in the same transaction. Two
+ * stores both flagged would make the destination depend on whichever row the
+ * query happened to return first — a collection landing in a different building
+ * on Tuesday than it did on Monday, for no reason anybody could see.
+ *
+ * Flagging a store never moves anything. Produce already recorded stays where it
+ * was written; only later collections go to the new store, which is the honest
+ * behaviour — the eggs are physically where they are.
+ */
+export async function setProduceStore(
+  locationId: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const principal = await requirePermission('inventory:manage');
+
+  const intent = String(formData.get('intent') ?? '');
+  if (intent !== 'receive' && intent !== 'stop') {
+    return { error: 'That action is not recognised.' };
+  }
+
+  const location = await db.stockLocation.findFirst({
+    where: { id: locationId, site: { ...orgFilter(principal) } },
+    select: { id: true, name: true, siteId: true, receivesProduction: true },
+  });
+  if (!location) return { error: 'That store no longer exists.' };
+  if (!canAccessSite(principal, location.siteId)) {
+    return { error: 'That store is at a farm you do not cover.' };
+  }
+
+  const receives = intent === 'receive';
+
+  await db.$transaction(async (tx) => {
+    if (receives) {
+      await tx.stockLocation.updateMany({
+        where: { siteId: location.siteId, NOT: { id: location.id } },
+        data: { receivesProduction: false },
+      });
+    }
+    await tx.stockLocation.update({
+      where: { id: location.id },
+      data: { receivesProduction: receives },
+    });
+  });
+
+  await recordAudit({
+    principal,
+    action: 'stockLocation.produce',
+    entityType: 'StockLocation',
+    entityId: location.id,
+    before: { receivesProduction: location.receivesProduction },
+    after: { receivesProduction: receives },
+  });
+
+  revalidatePath('/inventory/locations');
+  return { ok: receives ? `Produce now goes to ${location.name}.` : undefined };
 }

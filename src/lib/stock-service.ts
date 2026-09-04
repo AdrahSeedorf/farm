@@ -314,6 +314,8 @@ export async function listStockLocations(principal: Principal) {
     where: { site: { ...orgFilter(principal), ...siteIdFilter(principal) } },
     orderBy: [{ site: { name: 'asc' } }, { name: 'asc' }],
     include: { site: { select: { id: true, name: true, code: true } } },
+    // receivesProduction comes with the row; the locations screen needs it to
+    // say where a farm's collections land.
   });
 }
 

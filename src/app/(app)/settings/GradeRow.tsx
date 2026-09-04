@@ -15,9 +15,12 @@ interface Props {
     minGrams: number | null;
     maxGrams: number | null;
     isActive: boolean;
+    itemId: string | null;
     /** How many collections have ever been recorded against this grade. */
     lineCount: number;
   };
+  /** Store items a grade may be held as. */
+  items: { id: string; name: string; sku: string }[];
   canManage: boolean;
 }
 
@@ -28,7 +31,7 @@ interface Props {
  * a retired one is dimmed and says so. A list with no colour on it is a
  * catalogue with nothing wrong in it.
  */
-export function GradeRow({ grade, canManage }: Props) {
+export function GradeRow({ grade, items, canManage }: Props) {
   const [open, setOpen] = useState(false);
 
   const band =
@@ -85,7 +88,9 @@ export function GradeRow({ grade, canManage }: Props) {
               isSaleable: grade.isSaleable,
               minGrams: grade.minGrams,
               maxGrams: grade.maxGrams,
+              itemId: grade.itemId,
             }}
+            items={items}
             submitLabel="Save grade"
             idPrefix={`grade-${grade.id}`}
           />

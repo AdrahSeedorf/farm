@@ -26,6 +26,16 @@ export default async function GradesPage() {
 
   const canManage = await currentUserCan('settings:manage');
 
+  // Offered as the destination for a grade's produce. Archived items are left
+  // out of the list but an existing link to one is never severed silently —
+  // the collection screen says so instead, and the grade keeps pointing at it
+  // until somebody changes it here.
+  const items = await db.item.findMany({
+    where: { organisationId: principal.organisationId, isActive: true },
+    orderBy: { name: 'asc' },
+    select: { id: true, name: true, sku: true },
+  });
+
   const profiles = await db.productionTypeProfile.findMany({
     where: { speciesProfile: { organisationId: principal.organisationId } },
     orderBy: [{ speciesProfile: { name: 'asc' } }, { name: 'asc' }],
@@ -79,6 +89,7 @@ export default async function GradesPage() {
                   <GradeRow
                     key={grade.id}
                     canManage={canManage}
+                    items={items}
                     grade={{
                       id: grade.id,
                       key: grade.key,
@@ -87,6 +98,7 @@ export default async function GradesPage() {
                       minGrams: grade.minGrams,
                       maxGrams: grade.maxGrams,
                       isActive: grade.isActive,
+                      itemId: grade.itemId,
                       lineCount: grade._count.lines,
                     }}
                   />
@@ -110,6 +122,7 @@ export default async function GradesPage() {
                 <div className="mt-3">
                   <GradeForm
                     action={addProductionGrade.bind(null, profile.id)}
+                    items={items}
                     submitLabel="Add grade"
                     idPrefix={`new-${profile.id}`}
                   />

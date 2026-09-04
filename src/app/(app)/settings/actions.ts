@@ -120,6 +120,47 @@ async function ownedGrade(gradeId: string, organisationId: string) {
   });
 }
 
+
+/**
+ * Check a grade may claim this store item before writing.
+ *
+ * `ProductionGrade.itemId` is UNIQUE, so the database already refuses two
+ * grades pointing at one item — they would each add their eggs to it and the
+ * store would hold twice what the farm collected. This turns that refusal into
+ * a sentence naming the grade that has it, because a unique-constraint error
+ * reaching a settings screen tells nobody anything.
+ */
+async function itemClaimError(
+  itemId: string | null,
+  organisationId: string,
+  exceptGradeId?: string,
+): Promise<Record<string, string> | null> {
+  if (itemId === null) return null;
+
+  const item = await db.item.findFirst({
+    where: { id: itemId, organisationId },
+    select: { id: true, isActive: true, name: true },
+  });
+  if (!item) return { itemId: 'That store item no longer exists.' };
+  if (!item.isActive) {
+    return { itemId: `${item.name} is archived. Restore it first, or choose another item.` };
+  }
+
+  const taken = await db.productionGrade.findFirst({
+    where: { itemId, NOT: exceptGradeId ? { id: exceptGradeId } : undefined },
+    select: { name: true },
+  });
+  if (taken) {
+    return {
+      itemId:
+        `${item.name} is already held by the ${taken.name} grade. Two grades sharing one ` +
+        `item would each add their produce to it, and the store would say it holds twice ` +
+        `what was collected.`,
+    };
+  }
+  return null;
+}
+
 export async function addProductionGrade(
   productionTypeProfileId: string,
   _prev: FormState,
@@ -167,6 +208,9 @@ export async function addProductionGrade(
   const piece = await db.unitOfMeasure.findUnique({ where: { key: 'piece' } });
   if (!piece) return { error: 'The unit catalogue is not set up. Run the seed first.' };
 
+  const claim = await itemClaimError(input.itemId, principal.organisationId);
+  if (claim) return { fieldErrors: claim };
+
   const grade = await db.productionGrade.create({
     data: {
       productionTypeProfileId: profile.id,
@@ -175,6 +219,7 @@ export async function addProductionGrade(
       isSaleable: input.isSaleable,
       minGrams: input.minGrams,
       maxGrams: input.maxGrams,
+      itemId: input.itemId,
       baseUomId: piece.id,
       sortOrder: (last._max.sortOrder ?? 0) + 1,
     },
@@ -191,6 +236,7 @@ export async function addProductionGrade(
       isSaleable: grade.isSaleable,
       minGrams: grade.minGrams,
       maxGrams: grade.maxGrams,
+      itemId: grade.itemId,
     },
   });
 
@@ -212,6 +258,9 @@ export async function updateProductionGrade(
   if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
   const input = parsed.data;
 
+  const claim = await itemClaimError(input.itemId, principal.organisationId, before.id);
+  if (claim) return { fieldErrors: claim };
+
   // THE KEY IS NEVER REWRITTEN. It is what every existing production line, every
   // export and the seed all refer to; renaming "Large" to "Grade A" should change
   // what the screen says, not orphan a year of records.
@@ -222,6 +271,7 @@ export async function updateProductionGrade(
       isSaleable: input.isSaleable,
       minGrams: input.minGrams,
       maxGrams: input.maxGrams,
+      itemId: input.itemId,
     },
   });
 

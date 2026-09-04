@@ -24,7 +24,12 @@ export interface CollectionFormState {
   /** Fingerprint of those warnings — acceptance covers only them. */
   warningToken?: string;
   /** Set on success, so the form knows to clear itself for the next round. */
-  saved?: { sequence: number; total: number };
+  saved?: {
+    sequence: number;
+    total: number;
+    /** What happened in the store — including when the answer is "nothing, because…". */
+    stock: string;
+  };
 }
 
 /**
@@ -113,7 +118,7 @@ export async function saveCollection(
   // the person recording the second collection is standing where they recorded
   // the first. Staying put shows them what they just entered and leaves the form
   // ready for the next one.
-  return { saved: { sequence: result.sequence, total } };
+  return { saved: { sequence: result.sequence, total, stock: result.stockNote } };
 }
 
 /**
@@ -161,5 +166,11 @@ export async function correctRecord(
 
   revalidatePath('/production');
   revalidatePath(`/production/${record.animalGroupId}`);
-  return { saved: { sequence: 0, total: 0 } };
+  return {
+    saved: {
+      sequence: 0,
+      total: 0,
+      stock: result.stockNote ?? 'The store has been put back as it was.',
+    },
+  };
 }

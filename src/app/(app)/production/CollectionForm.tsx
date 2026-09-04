@@ -147,6 +147,14 @@ export function CollectionForm({
         >
           Collection {state.saved.sequence} saved —{' '}
           {state.saved.total.toLocaleString('en-GH')} {lower(words.production)}.
+          {/*
+            Said every time, including when nothing reached the store. Somebody
+            who has just recorded 340 eggs and hears nothing about stock cannot
+            tell produce going in from silently not going in.
+          */}
+          <span className="mt-1 block text-[13.5px] font-normal text-text-secondary">
+            {state.saved.stock}
+          </span>
         </p>
       ) : null}
 
