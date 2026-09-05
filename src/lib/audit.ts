@@ -40,6 +40,7 @@ export type AuditAction =
   | 'healthProgramme.approve'
   | 'healthProgramme.revoke'
   | 'visitor.log'
+  | 'cleaning.record'
   | 'visitor.signOut'
   | 'cost.allocate'
   | 'cost.reverse'

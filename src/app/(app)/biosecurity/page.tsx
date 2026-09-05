@@ -5,6 +5,7 @@ import { Forbidden } from '@/components/ui/Forbidden';
 import { visitorsOnSite, recentVisits, visitorSites } from '@/lib/visitor-service';
 import { VISITOR_KIND_LABELS, type VisitorKind } from '@/lib/validation/biosecurity';
 import { describeHours, hoursBetween } from '@/lib/biosecurity';
+import { cleaningByUnit } from '@/lib/cleaning-service';
 import { DowntimeForm } from './DowntimeForm';
 import { SignOutButton } from './SignOutButton';
 
@@ -16,10 +17,11 @@ export default async function BiosecurityPage() {
   const { principal, allowed } = await pageGuard('biosecurity:view');
   if (!allowed) return <Forbidden area="biosecurity records" roles={principal.roles} />;
 
-  const [onSite, recent, sites, canCreate, canEdit, canSetRule] = await Promise.all([
+  const [onSite, recent, sites, cleaning, canCreate, canEdit, canSetRule] = await Promise.all([
     visitorsOnSite(principal),
     recentVisits(principal, 30),
     visitorSites(principal),
+    cleaningByUnit(principal),
     currentUserCan('biosecurity:create'),
     currentUserCan('biosecurity:edit'),
     currentUserCan('site:edit'),
@@ -27,6 +29,9 @@ export default async function BiosecurityPage() {
 
   const now = new Date();
   const noRule = sites.some((s) => s.visitorDowntimeHours === null);
+  const needsCleaning = cleaning.filter(
+    (c) => c.status === 'OVERDUE' || c.status === 'DUE' || c.status === 'NEVER',
+  );
 
   return (
     <main className="mx-auto max-w-4xl px-5 py-8">
@@ -139,6 +144,45 @@ export default async function BiosecurityPage() {
           </div>
         </section>
       ) : null}
+
+      {/*
+        Cleaning that is due sits above the visit history, because it is a thing
+        somebody has to go and DO — and the history is a thing to look up.
+      */}
+      <section className="mt-8">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-[12px] font-bold uppercase tracking-[0.14em] text-brand-accent">
+            Cleaning
+          </h2>
+          <Link
+            href="/biosecurity/cleaning"
+            className="text-[13px] font-semibold text-brand-primary"
+          >
+            All cleaning records →
+          </Link>
+        </div>
+        {needsCleaning.length === 0 ? (
+          <p className="mt-2.5 text-[14px] text-text-secondary">
+            Nothing is due. Houses with no interval set are not counted here, because
+            nothing about them is being measured.
+          </p>
+        ) : (
+          <ul className="mt-2.5 space-y-2">
+            {needsCleaning.map((c) => (
+              <li
+                key={c.productionUnitId}
+                className={`rounded-control border px-4 py-2.5 text-[14px] ${
+                  c.status === 'OVERDUE'
+                    ? 'border-status-critical bg-status-critical-bg text-status-critical'
+                    : 'border-status-attention bg-status-attention-bg text-status-attention'
+                }`}
+              >
+                <strong className="font-semibold">{c.name}</strong> — {c.sentence}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section className="mt-8">
         <h2 className="text-[12px] font-bold uppercase tracking-[0.14em] text-text-muted">

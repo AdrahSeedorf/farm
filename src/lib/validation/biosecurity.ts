@@ -144,3 +144,123 @@ export const downtimeSchema = z.object({
       'Enter a whole number of hours, up to two weeks — or leave it blank for no rule.',
     ),
 });
+
+// ---------------------------------------------------------------------------
+// CLEANING & DISINFECTION
+// ---------------------------------------------------------------------------
+
+export const CLEANING_SCOPES = [
+  'PRODUCTION_UNIT',
+  'STORE',
+  'EQUIPMENT',
+  'VEHICLE',
+  'SITE_AREA',
+] as const;
+export type CleaningScope = (typeof CLEANING_SCOPES)[number];
+
+export const SCOPE_LABELS: Record<CleaningScope, string> = {
+  PRODUCTION_UNIT: 'A house',
+  STORE: 'A store room',
+  EQUIPMENT: 'Equipment',
+  VEHICLE: 'A vehicle',
+  SITE_AREA: 'Somewhere else on the farm',
+};
+
+export const CLEANING_STAGES = [
+  'DRY_CLEAN',
+  'WASH',
+  'DISINFECT',
+  'FUMIGATE',
+  'REST',
+  'FULL_TURNAROUND',
+] as const;
+export type CleaningStage = (typeof CLEANING_STAGES)[number];
+
+export const STAGE_LABELS: Record<CleaningStage, string> = {
+  DRY_CLEAN: 'Dry clean — muck out and sweep',
+  WASH: 'Wash',
+  DISINFECT: 'Disinfect',
+  FUMIGATE: 'Fumigate',
+  REST: 'Rest — left empty',
+  FULL_TURNAROUND: 'Full turnaround, all stages',
+};
+
+/**
+ * The stages that count as having cleaned a place.
+ *
+ * A REST period is time passing, not work done, and a dry clean on its own is
+ * half a job. Neither should reset the interval clock on a house — a screen
+ * that said "cleaned 2 days ago" because somebody recorded that the house was
+ * standing empty would be reporting the opposite of the truth.
+ */
+export const STAGES_THAT_RESET_THE_CLOCK: readonly CleaningStage[] = [
+  'DISINFECT',
+  'FUMIGATE',
+  'FULL_TURNAROUND',
+];
+
+const positiveInt = (max: number, message: string) =>
+  z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v === undefined || v === '' ? null : Number(v)))
+    .refine((v) => v === null || (Number.isInteger(v) && v > 0 && v <= max), message);
+
+export const cleaningSchema = z
+  .object({
+    siteId: z.string().trim().min(1, 'Choose a farm.'),
+    scope: z.enum(CLEANING_SCOPES, { message: 'What was cleaned?' }),
+    productionUnitId: optionalText(40),
+    areaName: optionalText(80),
+    stage: z.enum(CLEANING_STAGES, { message: 'Which part of the job?' }),
+    performedOn: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the date picker.')
+      .transform((v) => new Date(`${v}T00:00:00.000Z`)),
+    performedBy: optionalText(80),
+    itemId: optionalText(40),
+    /** In the item's own unit, as typed. Converted by the service. */
+    quantity: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v) => (v === undefined || v === '' ? null : Number(v)))
+      .refine((v) => v === null || (Number.isFinite(v) && v > 0), 'Enter how much was used.'),
+    stockLocationId: optionalText(40),
+    dilution: optionalText(40),
+    contactTimeMinutes: positiveInt(1440, 'Enter a whole number of minutes, up to a day.'),
+    notes: optionalText(500),
+  })
+  .refine((v) => v.scope !== 'PRODUCTION_UNIT' || v.productionUnitId !== null, {
+    path: ['productionUnitId'],
+    message: 'Which house?',
+  })
+  .refine(
+    (v) => v.scope === 'PRODUCTION_UNIT' || v.areaName !== null,
+    { path: ['areaName'], message: 'Name what was cleaned.' },
+  )
+  .refine((v) => v.itemId === null || v.quantity !== null, {
+    path: ['quantity'],
+    message: 'How much of it was used?',
+  })
+  .refine((v) => v.itemId === null || v.stockLocationId !== null, {
+    path: ['stockLocationId'],
+    message: 'Which store did it come out of?',
+  });
+
+export type CleaningInput = z.infer<typeof cleaningSchema>;
+
+/** How often a place should be cleaned. Blank means nobody is measuring it. */
+export const cleaningIntervalSchema = z.object({
+  cleaningIntervalDays: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v === undefined || v === '' ? null : Number(v)))
+    .refine(
+      (v) => v === null || (Number.isInteger(v) && v > 0 && v <= 365),
+      'Enter a whole number of days, up to a year — or leave it blank.',
+    ),
+});

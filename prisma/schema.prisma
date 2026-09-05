@@ -102,6 +102,7 @@ model Site {
   stockLocations  StockLocation[]
   userSiteScopes  UserSiteScope[]
   visitorLogs     VisitorLog[]
+  cleaningRecords CleaningRecord[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -121,10 +122,21 @@ model ProductionUnit {
   notes    String?
   isActive Boolean @default(true)
 
+  /// How often this place should be cleaned, in days.
+  ///
+  /// NULLABLE, WITH NO DEFAULT. A house between flocks, a house with birds in
+  /// it, and a store room are cleaned on completely different rhythms, and the
+  /// right number depends on the farm's own routine. Until one is set the
+  /// cleaning log still records everything; it simply calls nothing overdue.
+  /// See cleaningStatus() in src/lib/biosecurity.ts — a place with no interval
+  /// reads as UNTRACKED, never as up to date.
+  cleaningIntervalDays Int?
+
   site         Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
   animalGroups AnimalGroup[]
   dailyRecords DailyRecord[]
   productionRecords ProductionRecord[]
+  cleaningRecords   CleaningRecord[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -821,6 +833,7 @@ model Item {
   programmeItems HealthProgrammeItem[]
   healthEvents   HealthEvent[]
   productionGrade ProductionGrade?
+  cleaningRecords CleaningRecord[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1235,6 +1248,7 @@ model User {
   healthEvents       HealthEvent[]
   costAllocations    CostAllocation[]
   visitorLogs        VisitorLog[]
+  cleaningRecords    CleaningRecord[]
   productionRecords  ProductionRecord[]
   auditLogs          AuditLog[]
 
@@ -1435,4 +1449,79 @@ model VisitorLog {
 
   @@index([siteId, arrivedAt])
   @@index([siteId, departedAt])
+}
+
+/// What was cleaned. A house, a store, a vehicle, a stretch of yard.
+enum CleaningScope {
+  PRODUCTION_UNIT
+  STORE
+  EQUIPMENT
+  VEHICLE
+  /// A footbath, the perimeter, the gate — somewhere on the site with no row
+  /// of its own. Named in `areaName`.
+  SITE_AREA
+}
+
+/// Which part of the job this record covers.
+///
+/// SEPARATE ROWS, NOT TICK-BOXES ON ONE. Muck-out, wash, disinfect and rest
+/// happen on different days, often by different people, and a single row with
+/// four checkboxes cannot say when each was done. Between flocks the sequence
+/// IS the procedure, and its dates are what a vet or a buyer will ask about.
+enum CleaningStage {
+  DRY_CLEAN
+  WASH
+  DISINFECT
+  FUMIGATE
+  /// The empty period before the next flock goes in.
+  REST
+  /// One record covering the whole turnaround, for a farm that works that way.
+  FULL_TURNAROUND
+}
+
+/// Cleaning and disinfection, as carried out.
+///
+/// Append-only. A clean that was recorded happened; a clean recorded wrongly is
+/// corrected by recording the right one, not by editing the wrong one away.
+model CleaningRecord {
+  id               String        @id @default(cuid())
+  siteId           String
+  scope            CleaningScope
+  /// Set when the scope is PRODUCTION_UNIT.
+  productionUnitId String?
+  /// Free text for anything without a row of its own — "footbath at the gate".
+  areaName         String?
+
+  stage       CleaningStage
+  performedOn DateTime      @db.Date
+  /// Who did the work. FREE TEXT, because it is often a casual hand with no
+  /// account here, and a record that can only name system users would quietly
+  /// stop naming anybody.
+  performedBy String?
+
+  /// The product used, when it came out of the store.
+  itemId       String?
+  /// How much, in the item's base unit. Null when nothing was drawn from stock.
+  quantityBase Float?
+  /// As written on the container — "1:200", "20 ml per litre".
+  ///
+  /// FREE TEXT ON PURPOSE. Every disinfectant states its rate differently, and
+  /// a structured field would force whoever is holding the bottle to translate
+  /// it — which is exactly where a dilution error comes from.
+  dilution     String?
+  /// Minutes the surface was left wet, where the label asks for it.
+  contactTimeMinutes Int?
+
+  notes        String?
+  recordedById String
+
+  site           Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  productionUnit ProductionUnit? @relation(fields: [productionUnitId], references: [id])
+  item           Item?           @relation(fields: [itemId], references: [id])
+  recordedBy     User            @relation(fields: [recordedById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([siteId, performedOn])
+  @@index([productionUnitId, performedOn])
 }
