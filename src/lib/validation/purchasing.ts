@@ -76,3 +76,92 @@ export function supplierCodeFrom(name: string): string {
       .slice(0, 20) || 'SUPPLIER'
   );
 }
+
+// ---------------------------------------------------------------------------
+// PURCHASE ORDERS
+// ---------------------------------------------------------------------------
+
+const isoDate = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the date picker.')
+  .transform((value) => new Date(`${value}T00:00:00.000Z`))
+  .refine((d) => !Number.isNaN(d.getTime()), 'That date is not valid.');
+
+const todayUtc = () => {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+};
+
+/**
+ * The header of an order.
+ *
+ * `expectedOn` MAY BE BLANK and MAY BE IN THE FUTURE — the future is the normal
+ * case. It is deliberately not defaulted from the supplier's lead time here:
+ * the form offers that date as a suggestion somebody can accept or change, and
+ * a schema that filled it in silently would turn an average into a promise.
+ */
+export const orderHeaderSchema = z.object({
+  siteId: z.string().trim().min(1, 'Choose where the goods are going.'),
+  supplierId: z.string().trim().min(1, 'Choose a supplier.'),
+  orderedOn: isoDate.refine(
+    (d) => d.getTime() <= todayUtc().getTime(),
+    'An order cannot be placed on a future date.',
+  ),
+  expectedOn: z
+    .union([isoDate, z.literal('')])
+    .optional()
+    .transform((v) => (v === '' || v === undefined ? null : (v as Date))),
+  notes: optionalText(500),
+});
+
+export type OrderHeaderInput = z.infer<typeof orderHeaderSchema>;
+
+/**
+ * One line, added on its own.
+ *
+ * Lines are added ONE AT A TIME rather than as a grid of rows. A grid is a
+ * desktop idea; the person building a feed order is holding a phone in a store,
+ * and a five-column table at 390px wide is where mistyped quantities come from.
+ * It also means each line is saved the moment it is entered, so a dropped
+ * connection costs one line rather than the whole order.
+ */
+export const orderLineSchema = z.object({
+  itemId: z.string().trim().min(1, 'Choose an item.'),
+  quantityOrdered: z
+    .string()
+    .trim()
+    .min(1, 'Enter how many.')
+    .transform((v) => Number(v))
+    .refine(
+      (v) => Number.isFinite(v) && v > 0 && v <= 10_000_000,
+      'Enter a quantity greater than zero.',
+    ),
+  /** The unit KEY as ordered — bags, not kilograms. Forms carry no primary keys. */
+  orderUomKey: z.string().trim().min(1, 'Choose a unit.'),
+  /**
+   * Agreed price per ordered unit, in cedis. BLANK MEANS NOT AGREED, which is
+   * an ordinary state for an order placed by phone — not an unfinished form.
+   */
+  unitPriceCedis: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v === undefined || v === '' ? null : Number(v)))
+    .refine(
+      (v) => v === null || (Number.isFinite(v) && v >= 0 && v <= 100_000_000),
+      'Enter a price in cedis, or leave it blank if none was agreed.',
+    ),
+  notes: optionalText(200),
+});
+
+export type OrderLineInput = z.infer<typeof orderLineSchema>;
+
+/** Cancelling. The reason is required — see PurchaseOrder.cancelReason. */
+export const cancelOrderSchema = z.object({
+  cancelReason: z
+    .string()
+    .trim()
+    .min(3, 'Say why it was cancelled. In three months this is the only explanation there is.')
+    .max(200),
+});

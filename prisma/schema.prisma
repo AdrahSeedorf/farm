@@ -70,6 +70,7 @@ model Organisation {
   costAllocations CostAllocation[]
   biosecurityChecklists BiosecurityChecklist[]
   suppliers       Supplier[]
+  purchaseOrders  PurchaseOrder[]
 }
 
 model Site {
@@ -106,6 +107,7 @@ model Site {
   visitorLogs     VisitorLog[]
   cleaningRecords CleaningRecord[]
   biosecurityChecks BiosecurityCheck[]
+  purchaseOrders    PurchaseOrder[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -785,6 +787,7 @@ model UnitOfMeasure {
   productionGrades  ProductionGrade[]
   productionLines   ProductionLine[]   @relation("ProductionLineUom")
   productionRecords ProductionRecord[]
+  purchaseOrderLines PurchaseOrderLine[] @relation("PurchaseOrderLineUom")
 
   @@index([dimension])
 }
@@ -837,6 +840,7 @@ model Item {
   healthEvents   HealthEvent[]
   productionGrade ProductionGrade?
   cleaningRecords CleaningRecord[]
+  purchaseOrderLines PurchaseOrderLine[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1255,6 +1259,9 @@ model User {
   biosecurityChecks  BiosecurityCheck[]
   productionRecords  ProductionRecord[]
   auditLogs          AuditLog[]
+  ordersPlaced       PurchaseOrder[]    @relation("PurchaseOrderPlacedBy")
+  ordersSent         PurchaseOrder[]    @relation("PurchaseOrderSentBy")
+  ordersCancelled    PurchaseOrder[]    @relation("PurchaseOrderCancelledBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1680,11 +1687,126 @@ model Supplier {
   notes    String?
   isActive Boolean @default(true)
 
-  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  organisation   Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  purchaseOrders PurchaseOrder[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([organisationId, code])
   @@index([organisationId, isActive])
+}
+
+// ---------------------------------------------------------------------------
+// PURCHASE ORDERS
+// ---------------------------------------------------------------------------
+
+/// What somebody DID to an order.
+///
+/// Deliberately does NOT include "received" or "part received". Those are not
+/// acts; they are what the receipts add up to, and a status column that carries
+/// them is a status column that eventually disagrees with the rows beneath it.
+/// See `fulfilmentOf` in src/lib/purchasing.ts.
+enum PurchaseOrderState {
+  DRAFT
+  SENT
+  CANCELLED
+}
+
+/// An order placed with a supplier.
+///
+/// AN ORDER IS AN EXPECTATION, NOT A FACT. It is kept exactly as it was placed
+/// — including the price agreed and the date promised — so that when the lorry
+/// brings twenty-one bags at a different price, the gap between what was agreed
+/// and what happened is REPORTABLE rather than quietly overwritten.
+///
+/// Orders are CANCELLED, never deleted. "We ordered feed and cancelled it" is a
+/// fact about the farm's week; a row that vanishes takes the reason with it.
+model PurchaseOrder {
+  id             String             @id @default(cuid())
+  organisationId String
+  /// Where the goods are going. Orders are site-scoped like everything else, so
+  /// a supervisor at one farm cannot read another farm's ordering.
+  siteId         String
+  supplierId     String
+  /// Human reference quoted on the phone and on paperwork. PO-2026-0007.
+  orderNumber    String
+  state          PurchaseOrderState @default(DRAFT)
+
+  orderedOn  DateTime  @db.Date
+  /// The date agreed with the supplier — NOT the farm's average lead time.
+  ///
+  /// Lateness is measured against this and nothing else. Measured against an
+  /// average, every order from a slow supplier is permanently late and every
+  /// order from a fast one permanently early, which tells nobody anything.
+  /// Nullable, because plenty of orders are placed with no date promised.
+  expectedOn DateTime? @db.Date
+
+  /// When it actually went to the supplier, and who sent it. Stamped rather
+  /// than inferred from `state`, so "sent last Tuesday" survives a later edit.
+  sentAt   DateTime?
+  sentById String?
+
+  cancelledAt     DateTime?
+  cancelledById   String?
+  /// Why. Required by the action, because a cancellation with no reason is the
+  /// one record everybody argues about three months later.
+  cancelReason    String?
+
+  notes       String?
+  placedById  String
+
+  organisation Organisation        @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  site         Site                @relation(fields: [siteId], references: [id])
+  supplier     Supplier            @relation(fields: [supplierId], references: [id])
+  placedBy     User                @relation("PurchaseOrderPlacedBy", fields: [placedById], references: [id])
+  sentBy       User?               @relation("PurchaseOrderSentBy", fields: [sentById], references: [id])
+  cancelledBy  User?               @relation("PurchaseOrderCancelledBy", fields: [cancelledById], references: [id])
+  lines        PurchaseOrderLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, orderNumber])
+  @@index([organisationId, state])
+  @@index([siteId, orderedOn])
+  @@index([supplierId])
+}
+
+/// One item on an order.
+model PurchaseOrderLine {
+  id              String @id @default(cuid())
+  purchaseOrderId String
+  itemId          String
+
+  /// How many, IN THE UNIT IT WAS ORDERED IN — bags, not kilograms.
+  quantityOrdered Float
+  /// That unit. A farm orders bags and is invoiced per bag; converting to the
+  /// base unit before storing means every screen has to convert back, and one
+  /// of them eventually will not. `orderUom.factorToBase` does the conversion
+  /// when receipts are matched against this line.
+  orderUomId      String
+
+  /// Agreed price per ORDERED unit, in integer pesewas.
+  ///
+  /// NULLABLE. Plenty of deliveries on a small farm are arranged by phone with
+  /// the price settled on arrival, and a required price would force whoever
+  /// took the call to invent one. No price means no variance is reported —
+  /// rather than a variance reported against a guess.
+  unitPricePesewas Int?
+
+  notes String?
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  item          Item          @relation(fields: [itemId], references: [id])
+  orderUom      UnitOfMeasure @relation("PurchaseOrderLineUom", fields: [orderUomId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// One line per item. Two lines for one item make every "what is still
+  /// outstanding" figure ambiguous, and the receiving screen would not know
+  /// which of them to draw down.
+  @@unique([purchaseOrderId, itemId])
+  @@index([itemId])
 }

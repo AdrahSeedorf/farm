@@ -20,6 +20,7 @@ const ITEMS: { href: string; label: string; permission: Permission }[] = [
   { href: '/health', label: 'Health', permission: 'health:view' },
   { href: '/biosecurity', label: 'Biosecurity', permission: 'biosecurity:view' },
   { href: '/inventory', label: 'Store', permission: 'inventory:view' },
+  { href: '/purchases', label: 'Purchases', permission: 'procurement:view' },
   { href: '/suppliers', label: 'Suppliers', permission: 'supplier:view' },
   { href: '/costs', label: 'Costs', permission: 'finance:view' },
   { href: '/sites', label: 'Farms', permission: 'site:view' },

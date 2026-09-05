@@ -17,6 +17,10 @@ import {
   timingSentence,
   checkReceiptAgainstOrder,
   orderErrors,
+  orderNumberFor,
+  sequenceOf,
+  linesAreEditable,
+  whyLinesAreLocked,
   type OrderLine,
 } from '../purchasing';
 import { fromCedis } from '../money';
@@ -290,5 +294,52 @@ describe('what will not be saved', () => {
     // Two lines for one item make every "what is still outstanding" figure
     // ambiguous, and the receiving screen would not know which to draw down.
     expect(orderErrors([line(), line()])[0]).toMatch(/on this order twice/i);
+  });
+});
+
+describe('the reference on the paperwork', () => {
+  it('reads out over a phone', () => {
+    expect(orderNumberFor(2026, 7)).toBe('PO-2026-0007');
+    expect(orderNumberFor(2026, 1234)).toBe('PO-2026-1234');
+  });
+
+  it('does not truncate once a farm outgrows four digits', () => {
+    // Padding is a minimum width, not a cap. A number that silently became
+    // PO-2026-0000 on the ten-thousandth order would collide with nothing and
+    // then with everything.
+    expect(orderNumberFor(2026, 12345)).toBe('PO-2026-12345');
+  });
+
+  it('reads the sequence back so the next one can be worked out', () => {
+    expect(sequenceOf('PO-2026-0007', 2026)).toBe(7);
+    expect(sequenceOf('PO-2026-12345', 2026)).toBe(12345);
+  });
+
+  it('IGNORES A NUMBER FROM ANOTHER YEAR OR ANOTHER SYSTEM', () => {
+    // The sequence restarts each year, and a supplier's own reference typed
+    // into the wrong field must not be able to move ours.
+    expect(sequenceOf('PO-2025-0099', 2026)).toBe(0);
+    expect(sequenceOf('INV/4471', 2026)).toBe(0);
+    expect(sequenceOf('', 2026)).toBe(0);
+  });
+});
+
+describe('what may still be changed', () => {
+  it('a draft is a working document', () => {
+    expect(linesAreEditable('DRAFT')).toBe(true);
+    expect(whyLinesAreLocked('DRAFT')).toBeNull();
+  });
+
+  it('A SENT ORDER IS FROZEN, and says why', () => {
+    // Editing the lines of a sent order turns "they short-delivered us" into
+    // "our own record says they delivered exactly what we asked for".
+    expect(linesAreEditable('SENT')).toBe(false);
+    expect(whyLinesAreLocked('SENT')).toMatch(/what the supplier was asked for/i);
+    expect(whyLinesAreLocked('SENT')).toMatch(/cancel it and place a new one/i);
+  });
+
+  it('and so is a cancelled one', () => {
+    expect(linesAreEditable('CANCELLED')).toBe(false);
+    expect(whyLinesAreLocked('CANCELLED')).toMatch(/kept as they were/i);
   });
 });

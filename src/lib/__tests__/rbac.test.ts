@@ -270,3 +270,43 @@ describe('suppliers, and who keeps the list', () => {
     expect(can(principal(['sales']), 'procurement:view')).toBe(false);
   });
 });
+
+describe('ordering, and who may commit the farm to money', () => {
+  it('LETS THE STOREKEEPER PLACE AND EDIT ORDERS', () => {
+    // The person who knows the feed is nearly out is the person who should be
+    // able to raise the order. Making them ask the owner first is how a farm
+    // runs out of feed on a Sunday.
+    const storekeeper = principal(['storekeeper']);
+    expect(can(storekeeper, 'procurement:view')).toBe(true);
+    expect(can(storekeeper, 'procurement:create')).toBe(true);
+    expect(can(storekeeper, 'procurement:edit')).toBe(true);
+  });
+
+  it('but nobody below a manager may delete one', () => {
+    // Nothing in the application deletes an order — cancelling is the operation
+    // — so this permission guards a hole rather than a feature. It stays shut.
+    expect(can(principal(['storekeeper']), 'procurement:delete')).toBe(false);
+    expect(can(principal(['supervisor']), 'procurement:delete')).toBe(false);
+  });
+
+  it('KEEPS ORDERING AWAY FROM WORKERS AND SUPERVISORS', () => {
+    // Orders carry agreed prices. A worker sees no financial figure anywhere
+    // else in the system, and a supervisor runs the houses, not the chequebook.
+    for (const role of ['worker', 'supervisor'] as const) {
+      expect(can(principal([role]), 'procurement:view'), role).toBe(false);
+      expect(can(principal([role]), 'procurement:create'), role).toBe(false);
+    }
+  });
+
+  it('and sales staff buy nothing at all', () => {
+    expect(can(principal(['sales']), 'procurement:create')).toBe(false);
+  });
+
+  it('scopes ordering to the sites a person actually covers', () => {
+    // An order is delivered TO a farm. A storekeeper at one site must not be
+    // able to place or read orders for another.
+    const keeper = principal(['storekeeper'], ['site-a']);
+    expect(can(keeper, 'procurement:create', 'site-a')).toBe(true);
+    expect(can(keeper, 'procurement:create', 'site-b')).toBe(false);
+  });
+});

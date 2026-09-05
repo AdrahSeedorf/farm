@@ -374,3 +374,66 @@ function round(value: number): number {
 function startOfDay(d: Date): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
+
+// ---------------------------------------------------------------------------
+// ORDER NUMBERS
+// ---------------------------------------------------------------------------
+
+/**
+ * The reference quoted on the phone and written on the delivery note.
+ *
+ * PO-2026-0007. Year first because that is how a farm files paper, and the
+ * sequence restarts each year so the number stays short enough to read out.
+ *
+ * DERIVED, NEVER TYPED. A reference somebody keys in by hand is a reference
+ * that is eventually duplicated, and two orders sharing one number is the
+ * failure that makes a supplier dispute unresolvable.
+ */
+export function orderNumberFor(year: number, sequence: number): string {
+  return `PO-${year}-${String(sequence).padStart(4, '0')}`;
+}
+
+/**
+ * The sequence already used by an existing number, or 0 if it is not one of
+ * ours. Used to work out what comes next without a database sequence — a farm
+ * places a handful of orders a week, not thousands a second.
+ */
+export function sequenceOf(orderNumber: string, year: number): number {
+  const match = new RegExp(`^PO-${year}-(\\d{4,})$`).exec(orderNumber);
+  return match ? Number(match[1]) : 0;
+}
+
+// ---------------------------------------------------------------------------
+// WHAT MAY BE CHANGED, AND WHEN
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether an order's lines may still be edited.
+ *
+ * A DRAFT is a working document. Once it has been SENT, the lines are what the
+ * supplier was told, and editing them turns "they short-delivered us" into
+ * "our own record says they delivered exactly what we asked for". So a sent
+ * order is corrected by CANCELLING and re-placing, which leaves both halves of
+ * the story on the record.
+ *
+ * Nothing here is a permission check — see rbac.ts for those. This is about
+ * whether the change makes sense at all.
+ */
+export function linesAreEditable(state: OrderState): boolean {
+  return state === 'DRAFT';
+}
+
+export function whyLinesAreLocked(state: OrderState): string | null {
+  switch (state) {
+    case 'DRAFT':
+      return null;
+    case 'SENT':
+      return (
+        'This order has been sent, so its lines are fixed. They are the record of what ' +
+        'the supplier was asked for — if the order needs to change, cancel it and place ' +
+        'a new one so both halves stay on the record.'
+      );
+    case 'CANCELLED':
+      return 'This order was cancelled. Its lines are kept as they were.';
+  }
+}
