@@ -69,6 +69,7 @@ model Organisation {
   breeds          Breed[]
   costAllocations CostAllocation[]
   biosecurityChecklists BiosecurityChecklist[]
+  suppliers       Supplier[]
 }
 
 model Site {
@@ -1628,4 +1629,62 @@ model BiosecurityCheckLine {
 
   @@unique([checkId, checklistItemId])
   @@index([checklistItemId, result])
+}
+
+// ---------------------------------------------------------------------------
+// PROCUREMENT
+// Milestone 11. Who the farm buys from, what was ordered, what turned up.
+// ---------------------------------------------------------------------------
+
+/// Somebody the farm buys from.
+///
+/// ARCHIVED, NEVER DELETED. Orders point at a supplier, and a year of feed
+/// deliveries has to stay readable after the farm stops using that mill.
+model Supplier {
+  id             String  @id @default(cuid())
+  organisationId String
+  name           String
+  /// Short reference used on paperwork. Derived from the name when left blank.
+  code           String
+
+  contactName String?
+  /// Kept EXACTLY AS TYPED. Ghanaian numbers arrive in five different shapes
+  /// and all of them are correct; src/lib/ghana.ts works out a dialable form
+  /// when it can and leaves the original alone when it cannot.
+  phone       String?
+  /// A second number, because one line being off is normal.
+  altPhone    String?
+  email       String?
+
+  town     String?
+  district String?
+  region   String?
+
+  /// What this supplier actually sells, so the order screen can offer the right
+  /// items first. Empty means nobody has said, not that they sell nothing.
+  supplies ItemCategory[]
+
+  /// How long THIS supplier takes, in days.
+  ///
+  /// Overrides the organisation's average when it is set. A mill two weeks away
+  /// and a shop that delivers next morning should not share one figure — and
+  /// the farm-wide default exists precisely because most suppliers have never
+  /// been timed. Null means "use the farm's figure".
+  leadTimeDays Int?
+
+  /// As agreed, in words. "Cash on delivery", "30 days", "half up front".
+  /// FREE TEXT: every supplier states terms differently and a structured field
+  /// would force whoever took the call to translate them.
+  paymentTerms String?
+
+  notes    String?
+  isActive Boolean @default(true)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, code])
+  @@index([organisationId, isActive])
 }

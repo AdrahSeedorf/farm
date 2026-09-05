@@ -236,3 +236,37 @@ describe('matrix integrity', () => {
     expect(can(both, 'finance:view')).toBe(false);
   });
 });
+
+describe('suppliers, and who keeps the list', () => {
+  it('LETS THE STOREKEEPER ADD A SUPPLIER', () => {
+    // The person who takes the delivery is the person who finds out the mill
+    // has a new number. A supplier list only the owner can touch is a supplier
+    // list that goes stale, and then somebody rings the old number at 6am.
+    const storekeeper = principal(['storekeeper']);
+    expect(can(storekeeper, 'supplier:view')).toBe(true);
+    expect(can(storekeeper, 'supplier:create')).toBe(true);
+    expect(can(storekeeper, 'supplier:edit')).toBe(true);
+  });
+
+  it('but archiving is not deleting, and neither is theirs to do outright', () => {
+    // Archiving runs through supplier:edit above. supplier:delete exists in the
+    // catalogue and is held by nobody but the owner, because a supplier row is
+    // what a year of invoices points at.
+    expect(can(principal(['storekeeper']), 'supplier:delete')).toBe(false);
+    expect(can(principal(['manager']), 'supplier:delete')).toBe(true);
+    expect(can(principal(['owner']), 'supplier:delete')).toBe(true);
+  });
+
+  it('KEEPS A WORKER OUT OF IT ENTIRELY', () => {
+    // Supplier records carry payment terms. A worker sees no commercial terms
+    // anywhere else in the system and must not see them here either.
+    const worker = principal(['worker']);
+    expect(can(worker, 'supplier:view')).toBe(false);
+    expect(can(worker, 'supplier:create')).toBe(false);
+  });
+
+  it('and out of sales staff’s way too — they buy nothing', () => {
+    expect(can(principal(['sales']), 'supplier:view')).toBe(false);
+    expect(can(principal(['sales']), 'procurement:view')).toBe(false);
+  });
+});
