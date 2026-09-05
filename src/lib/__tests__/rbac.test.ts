@@ -99,6 +99,73 @@ describe('the role matrix honours the specification', () => {
   });
 });
 
+/**
+ * Milestone 10 added three logs that different people touch for different
+ * reasons, and the boundaries between them are easy to get wrong by accident.
+ * These assert the shape deliberately rather than leaving it to whatever
+ * `all()` happened to expand to.
+ */
+describe('biosecurity, and who does what', () => {
+  it('LETS A WORKER KEEP THE GATE BOOK', () => {
+    // The person at the gate when a feed lorry arrives is a farmhand, not the
+    // owner. A visitor log only the manager can write is a visitor log with
+    // gaps in it exactly where the deliveries were.
+    const worker = principal(['worker']);
+    expect(can(worker, 'biosecurity:view')).toBe(true);
+    expect(can(worker, 'biosecurity:create')).toBe(true);
+  });
+
+  it('but does not let them sign a visitor out or rewrite a record', () => {
+    const worker = principal(['worker']);
+    expect(can(worker, 'biosecurity:edit')).toBe(false);
+    expect(can(worker, 'biosecurity:manage')).toBe(false);
+  });
+
+  it('THE DOWNTIME RULE IS NOT A WORKER’S TO SET', () => {
+    // How many hours this farm asks for is a decision about disease pressure,
+    // taken with a vet. It sits behind site:edit, which a worker never holds.
+    expect(can(principal(['worker']), 'site:edit')).toBe(false);
+    expect(can(principal(['supervisor']), 'site:edit')).toBe(false);
+    expect(can(principal(['manager']), 'site:edit')).toBe(true);
+  });
+
+  it('a supervisor runs the logs but does not own the checklist', () => {
+    const supervisor = principal(['supervisor']);
+    expect(can(supervisor, 'biosecurity:create')).toBe(true);
+    expect(can(supervisor, 'biosecurity:edit')).toBe(true);
+    // Rewording what the farm inspects against is a standard-setting act.
+    expect(can(supervisor, 'biosecurity:manage')).toBe(false);
+  });
+
+  it('only the owner and the manager shape the checklists', () => {
+    for (const role of ROLES) {
+      const allowed = role === 'owner' || role === 'manager';
+      expect(can(principal([role]), 'biosecurity:manage')).toBe(allowed);
+    }
+  });
+
+  it('the vet reads the biosecurity record and writes none of it', () => {
+    const vet = principal(['vet']);
+    expect(can(vet, 'biosecurity:view')).toBe(true);
+    expect(can(vet, 'biosecurity:create')).toBe(false);
+    expect(can(vet, 'biosecurity:edit')).toBe(false);
+  });
+
+  it('nobody commercial touches it at all', () => {
+    for (const role of ['sales', 'driver', 'customer'] as const) {
+      expect(can(principal([role]), 'biosecurity:view')).toBe(false);
+      expect(can(principal([role]), 'biosecurity:create')).toBe(false);
+    }
+  });
+
+  it('a worker still sees no money on the way past', () => {
+    // The biosecurity screens sit next to the costs screens in the navigation.
+    // This is the assertion that stops a convenient shortcut being taken later.
+    const worker = principal(['worker']);
+    expect(can(worker, 'finance:view')).toBe(false);
+  });
+});
+
 describe('site scoping', () => {
   it('restricts a scoped user to their own sites', () => {
     const supervisor = principal(['supervisor'], ['site-a']);
