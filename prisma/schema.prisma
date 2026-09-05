@@ -68,6 +68,7 @@ model Organisation {
   healthProgrammes HealthProgramme[]
   breeds          Breed[]
   costAllocations CostAllocation[]
+  biosecurityChecklists BiosecurityChecklist[]
 }
 
 model Site {
@@ -103,6 +104,7 @@ model Site {
   userSiteScopes  UserSiteScope[]
   visitorLogs     VisitorLog[]
   cleaningRecords CleaningRecord[]
+  biosecurityChecks BiosecurityCheck[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1249,6 +1251,7 @@ model User {
   costAllocations    CostAllocation[]
   visitorLogs        VisitorLog[]
   cleaningRecords    CleaningRecord[]
+  biosecurityChecks  BiosecurityCheck[]
   productionRecords  ProductionRecord[]
   auditLogs          AuditLog[]
 
@@ -1524,4 +1527,105 @@ model CleaningRecord {
 
   @@index([siteId, performedOn])
   @@index([productionUnitId, performedOn])
+}
+
+/// A checklist the farm inspects against.
+///
+/// NO CHECKLIST CONTENT IS SHIPPED AS A STANDARD. What matters on a particular
+/// farm depends on its layout, its neighbours and whoever buys from it, and a
+/// list baked into software would be read as an authority it has not earned.
+/// The screens offer a set of common starting points, clearly labelled as a
+/// starting point rather than a standard, and every line is editable.
+model BiosecurityChecklist {
+  id             String  @id @default(cuid())
+  organisationId String
+  name           String
+  description    String?
+  /// RETIRED, NEVER DELETED. Inspections point at it.
+  isActive       Boolean @default(true)
+
+  organisation Organisation               @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  items        BiosecurityChecklistItem[]
+  checks       BiosecurityCheck[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, name])
+}
+
+model BiosecurityChecklistItem {
+  id          String  @id @default(cuid())
+  checklistId String
+  /// Stable key, derived from the label. Survives a rewording.
+  key         String
+  label       String
+  /// What to actually look at. Optional, and worth filling in — the person
+  /// holding the phone at six in the morning is not always the person who
+  /// wrote the list.
+  guidance    String?
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+
+  checklist BiosecurityChecklist   @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  lines     BiosecurityCheckLine[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([checklistId, key])
+  @@index([checklistId, sortOrder])
+}
+
+enum CheckResult {
+  PASS
+  FAIL
+  /// Looked at nothing. Counted and reported, never folded into a pass.
+  NOT_CHECKED
+  NOT_APPLICABLE
+}
+
+/// One inspection: a checklist, walked on a day, with an answer per line.
+model BiosecurityCheck {
+  id          String   @id @default(cuid())
+  siteId      String
+  checklistId String
+  performedOn DateTime @db.Date
+  /// Free text — an inspector, a buyer's auditor or a farmhand.
+  performedBy String?
+  notes       String?
+  recordedById String
+
+  site       Site                 @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  checklist  BiosecurityChecklist @relation(fields: [checklistId], references: [id])
+  recordedBy User                 @relation(fields: [recordedById], references: [id])
+  lines      BiosecurityCheckLine[]
+
+  createdAt DateTime @default(now())
+
+  @@index([siteId, performedOn])
+}
+
+model BiosecurityCheckLine {
+  id              String      @id @default(cuid())
+  checkId         String
+  checklistItemId String
+  result          CheckResult
+  note            String?
+
+  /// The wording of the line AS IT STOOD when the inspection was carried out.
+  ///
+  /// COPIED, NOT JOINED. Rename "No rodent activity" to "Rodent control in
+  /// place" next year and every past inspection would otherwise be reported as
+  /// having answered a question nobody was asked. What an inspection recorded
+  /// is what was on the page that morning.
+  labelAtCheck    String
+
+  check BiosecurityCheck         @relation(fields: [checkId], references: [id], onDelete: Cascade)
+  item  BiosecurityChecklistItem @relation(fields: [checklistItemId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([checkId, checklistItemId])
+  @@index([checklistItemId, result])
 }

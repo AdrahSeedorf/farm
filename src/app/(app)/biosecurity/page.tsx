@@ -6,6 +6,7 @@ import { visitorsOnSite, recentVisits, visitorSites } from '@/lib/visitor-servic
 import { VISITOR_KIND_LABELS, type VisitorKind } from '@/lib/validation/biosecurity';
 import { describeHours, hoursBetween } from '@/lib/biosecurity';
 import { cleaningByUnit } from '@/lib/cleaning-service';
+import { openFailures } from '@/lib/checklist-service';
 import { DowntimeForm } from './DowntimeForm';
 import { SignOutButton } from './SignOutButton';
 
@@ -17,15 +18,17 @@ export default async function BiosecurityPage() {
   const { principal, allowed } = await pageGuard('biosecurity:view');
   if (!allowed) return <Forbidden area="biosecurity records" roles={principal.roles} />;
 
-  const [onSite, recent, sites, cleaning, canCreate, canEdit, canSetRule] = await Promise.all([
+  const [onSite, recent, sites, cleaning, failures, canCreate, canEdit, canSetRule] =
+    await Promise.all([
     visitorsOnSite(principal),
     recentVisits(principal, 30),
     visitorSites(principal),
     cleaningByUnit(principal),
+    openFailures(principal),
     currentUserCan('biosecurity:create'),
     currentUserCan('biosecurity:edit'),
-    currentUserCan('site:edit'),
-  ]);
+      currentUserCan('site:edit'),
+    ]);
 
   const now = new Date();
   const noRule = sites.some((s) => s.visitorDowntimeHours === null);
@@ -146,6 +149,36 @@ export default async function BiosecurityPage() {
       ) : null}
 
       {/*
+        The last inspection's failures come first: they are the things somebody
+        has already gone and found, and nobody has answered since.
+      */}
+      {failures.length > 0 ? (
+        <section className="mt-8 rounded-card border border-status-critical bg-status-critical-bg p-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-[12px] font-bold uppercase tracking-[0.14em] text-status-critical">
+              Failed at the last inspection
+            </h2>
+            <Link
+              href="/biosecurity/checks"
+              className="text-[13px] font-semibold text-status-critical underline underline-offset-2"
+            >
+              All inspections →
+            </Link>
+          </div>
+          <ul className="mt-3 space-y-1.5">
+            {failures.flatMap((f) =>
+              f.failures.map((line) => (
+                <li key={`${f.checkId}-${line.key}`} className="text-[15px] text-status-critical">
+                  <strong className="font-semibold">{line.label}</strong>
+                  {line.note ? ` — ${line.note}` : ''}
+                </li>
+              )),
+            )}
+          </ul>
+        </section>
+      ) : null}
+
+      {/*
         Cleaning that is due sits above the visit history, because it is a thing
         somebody has to go and DO — and the history is a thing to look up.
       */}
@@ -154,12 +187,20 @@ export default async function BiosecurityPage() {
           <h2 className="text-[12px] font-bold uppercase tracking-[0.14em] text-brand-accent">
             Cleaning
           </h2>
-          <Link
-            href="/biosecurity/cleaning"
-            className="text-[13px] font-semibold text-brand-primary"
-          >
-            All cleaning records →
-          </Link>
+          <span className="flex gap-4">
+            <Link
+              href="/biosecurity/checks"
+              className="text-[13px] font-semibold text-brand-primary"
+            >
+              Inspections →
+            </Link>
+            <Link
+              href="/biosecurity/cleaning"
+              className="text-[13px] font-semibold text-brand-primary"
+            >
+              Cleaning records →
+            </Link>
+          </span>
         </div>
         {needsCleaning.length === 0 ? (
           <p className="mt-2.5 text-[14px] text-text-secondary">

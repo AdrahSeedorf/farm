@@ -41,6 +41,8 @@ export type AuditAction =
   | 'healthProgramme.revoke'
   | 'visitor.log'
   | 'cleaning.record'
+  | 'checklist.create'
+  | 'check.record'
   | 'visitor.signOut'
   | 'cost.allocate'
   | 'cost.reverse'

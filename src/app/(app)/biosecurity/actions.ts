@@ -7,11 +7,23 @@ import { recordAudit } from '@/lib/audit';
 import { recordVisit, signOutVisit, setDowntime, VisitorError } from '@/lib/visitor-service';
 import { recordCleaning, setCleaningInterval, CleaningError } from '@/lib/cleaning-service';
 import {
+  createChecklist,
+  addChecklistItem,
+  setChecklistItemActive,
+  addStarterItems,
+  recordCheck,
+  ChecklistError,
+} from '@/lib/checklist-service';
+import {
   visitorSchema,
   departureSchema,
   downtimeSchema,
   cleaningSchema,
   cleaningIntervalSchema,
+  checklistSchema,
+  checklistItemSchema,
+  checkSchema,
+  parseCheckLines,
 } from '@/lib/validation/biosecurity';
 import { fieldErrorsFrom } from '@/lib/validation/site';
 
@@ -226,4 +238,144 @@ export async function updateCleaningInterval(
         ? `${changed.name} is no longer measured against an interval.`
         : `${changed.name} — every ${parsed.data.cleaningIntervalDays} days.`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// CHECKLISTS & INSPECTIONS
+// ---------------------------------------------------------------------------
+
+export async function createBiosecurityChecklist(
+  _prev: BiosecurityFormState,
+  formData: FormData,
+): Promise<BiosecurityFormState> {
+  const principal = await requirePermission('biosecurity:manage');
+
+  const parsed = checklistSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+
+  let id: string;
+  try {
+    id = await createChecklist(principal, parsed.data);
+  } catch (error) {
+    if (error instanceof ChecklistError) return { error: error.message };
+    throw error;
+  }
+
+  await recordAudit({
+    principal,
+    action: 'checklist.create',
+    entityType: 'BiosecurityChecklist',
+    entityId: id,
+    after: { name: parsed.data.name },
+  });
+
+  revalidatePath('/biosecurity/checklists');
+  redirect(`/biosecurity/checklists/${id}`);
+}
+
+export async function addChecklistLine(
+  checklistId: string,
+  _prev: BiosecurityFormState,
+  formData: FormData,
+): Promise<BiosecurityFormState> {
+  const principal = await requirePermission('biosecurity:manage');
+
+  const parsed = checklistItemSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+
+  try {
+    await addChecklistItem(principal, checklistId, parsed.data);
+  } catch (error) {
+    if (error instanceof ChecklistError) return { error: error.message };
+    throw error;
+  }
+
+  revalidatePath(`/biosecurity/checklists/${checklistId}`);
+  return { ok: `"${parsed.data.label}" added.` };
+}
+
+/** Retire or restore a line. The intent is explicit — see the archive toggles. */
+export async function toggleChecklistLine(
+  itemId: string,
+  checklistId: string,
+  _prev: BiosecurityFormState,
+  formData: FormData,
+): Promise<BiosecurityFormState> {
+  const principal = await requirePermission('biosecurity:manage');
+
+  const intent = String(formData.get('intent') ?? '');
+  if (intent !== 'retire' && intent !== 'restore') {
+    return { error: 'That action is not recognised.' };
+  }
+
+  let label: string;
+  try {
+    label = await setChecklistItemActive(principal, itemId, intent === 'restore');
+  } catch (error) {
+    if (error instanceof ChecklistError) return { error: error.message };
+    throw error;
+  }
+
+  revalidatePath(`/biosecurity/checklists/${checklistId}`);
+  return { ok: intent === 'retire' ? `"${label}" retired.` : `"${label}" restored.` };
+}
+
+/** Fill an empty checklist with the common starting points. */
+export async function fillWithStarter(
+  checklistId: string,
+  _prev: BiosecurityFormState,
+  formData: FormData,
+): Promise<BiosecurityFormState> {
+  const principal = await requirePermission('biosecurity:manage');
+
+  // An explicit intent rather than a bare submit. The same guard the archive
+  // toggles use: it makes a double tap on a slow connection unambiguous, and it
+  // keeps the action from being a button that does something on any POST.
+  if (String(formData.get('intent') ?? '') !== 'fill') {
+    return { error: 'That action is not recognised.' };
+  }
+
+  let added: number;
+  try {
+    added = await addStarterItems(principal, checklistId);
+  } catch (error) {
+    if (error instanceof ChecklistError) return { error: error.message };
+    throw error;
+  }
+
+  revalidatePath(`/biosecurity/checklists/${checklistId}`);
+  return {
+    ok: `${added} lines added. Change the wording, add your own and remove anything that does not apply here.`,
+  };
+}
+
+/** Record an inspection. */
+export async function logCheck(
+  _prev: BiosecurityFormState,
+  formData: FormData,
+): Promise<BiosecurityFormState> {
+  const principal = await requirePermission('biosecurity:create');
+
+  const parsed = checkSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+
+  let result: { id: string; failed: number };
+  try {
+    result = await recordCheck(principal, parsed.data, parseCheckLines(formData));
+  } catch (error) {
+    if (error instanceof ChecklistError) return { error: error.message };
+    throw error;
+  }
+
+  await recordAudit({
+    principal,
+    action: 'check.record',
+    entityType: 'BiosecurityCheck',
+    entityId: result.id,
+    after: { performedOn: parsed.data.performedOn, failed: result.failed },
+  });
+
+  revalidatePath('/biosecurity');
+  revalidatePath('/biosecurity/checks');
+  redirect(`/biosecurity/checks/${result.id}`);
 }

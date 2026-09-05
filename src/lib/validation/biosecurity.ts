@@ -264,3 +264,117 @@ export const cleaningIntervalSchema = z.object({
       'Enter a whole number of days, up to a year — or leave it blank.',
     ),
 });
+
+// ---------------------------------------------------------------------------
+// INSPECTIONS
+// ---------------------------------------------------------------------------
+
+export const CHECK_RESULTS = ['PASS', 'FAIL', 'NOT_CHECKED', 'NOT_APPLICABLE'] as const;
+export type CheckResultValue = (typeof CHECK_RESULTS)[number];
+
+export const RESULT_LABELS: Record<CheckResultValue, string> = {
+  PASS: 'Pass',
+  FAIL: 'Fail',
+  NOT_CHECKED: 'Not checked',
+  NOT_APPLICABLE: 'N/A',
+};
+
+/**
+ * Common starting points for a poultry biosecurity checklist.
+ *
+ * OFFERED, NEVER IMPOSED, AND NOT A STANDARD. These are prompts to go and look
+ * at something — not clinical instructions, and not an audit scheme. What
+ * actually matters on a particular farm depends on its layout, its neighbours
+ * and whoever buys from it, so every line here is editable, removable, and
+ * placed on screen under a sentence saying exactly that.
+ *
+ * The distinction from the vaccination schedule, which this system deliberately
+ * refuses to author: getting one of these wrong means somebody looked at the
+ * wrong thing. Getting a vaccination schedule wrong means something went into a
+ * bird, and from there into food.
+ */
+export const STARTER_CHECKLIST: { label: string; guidance: string }[] = [
+  { label: 'Perimeter fence intact', guidance: 'Walk the boundary. Look for gaps at ground level.' },
+  { label: 'Gate closed and controlled', guidance: 'Can a vehicle reach the houses without anyone knowing?' },
+  { label: 'Footbath charged and clean', guidance: 'Not just present — is the solution fresh and not full of mud?' },
+  { label: 'Visitor book at the entrance', guidance: 'Is it where a visitor would actually see it?' },
+  { label: 'Farm clothing and boots available', guidance: 'Enough sets for the visitors you get.' },
+  { label: 'No rodent activity', guidance: 'Droppings, gnawed bags, runs behind the feed store.' },
+  { label: 'Wild birds excluded from houses', guidance: 'Check netting, vents and any broken mesh.' },
+  { label: 'Feed store closed and dry', guidance: 'Spilled feed outside a store is a rodent invitation.' },
+  { label: 'Water source protected', guidance: 'Covered tank, no standing water birds can reach.' },
+  { label: 'Dead birds removed and disposed of', guidance: 'How, and how quickly?' },
+  { label: 'Litter and manure stored away from houses', guidance: 'And away from the route feed comes in on.' },
+  { label: 'Equipment not shared with other farms', guidance: 'Crates, trolleys and vehicles especially.' },
+];
+
+export const checklistSchema = z.object({
+  name: z.string().trim().min(2, 'Give the checklist a name.').max(80),
+  description: optionalText(300),
+});
+
+export const checklistItemSchema = z.object({
+  label: z.string().trim().min(3, 'What should the person look at?').max(120),
+  guidance: optionalText(300),
+});
+
+export const checkSchema = z.object({
+  siteId: z.string().trim().min(1, 'Choose a farm.'),
+  checklistId: z.string().trim().min(1, 'Choose a checklist.'),
+  performedOn: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the date picker.')
+    .transform((v) => new Date(`${v}T00:00:00.000Z`)),
+  performedBy: optionalText(80),
+  notes: optionalText(500),
+});
+
+export type ChecklistInput = z.infer<typeof checklistSchema>;
+export type ChecklistItemInput = z.infer<typeof checklistItemSchema>;
+export type CheckInput = z.infer<typeof checkSchema>;
+
+/**
+ * The per-line answers, which arrive as `result:<itemId>` and `note:<itemId>`.
+ *
+ * A LINE NOBODY ANSWERED COMES BACK AS NOT_CHECKED, never as a pass. The whole
+ * value of an inspection record is that it distinguishes what was looked at
+ * from what was not.
+ */
+export function parseCheckLines(
+  formData: FormData,
+): { itemId: string; result: CheckResultValue; note: string | null }[] {
+  const results = new Map<string, CheckResultValue>();
+  const notes = new Map<string, string>();
+
+  for (const [key, value] of formData.entries()) {
+    const raw = String(value).trim();
+    if (key.startsWith('result:')) {
+      const itemId = key.slice('result:'.length);
+      results.set(
+        itemId,
+        (CHECK_RESULTS as readonly string[]).includes(raw)
+          ? (raw as CheckResultValue)
+          : 'NOT_CHECKED',
+      );
+    } else if (key.startsWith('note:')) {
+      const itemId = key.slice('note:'.length);
+      if (raw !== '') notes.set(itemId, raw.slice(0, 300));
+    }
+  }
+
+  return [...results.entries()].map(([itemId, result]) => ({
+    itemId,
+    result,
+    note: notes.get(itemId) ?? null,
+  }));
+}
+
+/** A stable key from a label, so a rewording does not orphan past answers. */
+export function checklistItemKeyFrom(label: string): string {
+  return label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 60);
+}
