@@ -16,12 +16,18 @@ import {
   runsOutOn,
   usageRate,
   DEFAULT_LEAD_TIME_DAYS,
+  leadTimeForCategory,
+  leadTimeBasisSentence,
+  incomingSentence,
+  type LeadTimeBasis,
+  type Incoming,
   DEFAULT_WINDOW_DAYS,
   USAGE_MOVEMENTS,
   type CoverUrgency,
   type UsageRate,
 } from '@/lib/stock-cover';
 import { fromBase, type Dimension } from '@/lib/uom';
+import { supplierLeadTimes, incomingByItem } from '@/lib/order-service';
 
 /**
  * Stock read model — ADRAH Farms
@@ -132,6 +138,12 @@ export interface StockOverviewRow extends ItemRow {
   runsOut: Date | null;
   urgency: CoverUrgency;
   sentence: string;
+  /** Which lead time the urgency was measured against, and whose it is. */
+  leadTime: LeadTimeBasis;
+  leadTimeSentence: string;
+  /** What is on order and not yet delivered. NEVER counted as stock on hand. */
+  incoming: Incoming | null;
+  incomingSentence: string;
   expired: BatchStock[];
   expiringSoon: BatchStock[];
 }
@@ -152,8 +164,10 @@ export async function stockOverview(
 ): Promise<StockOverviewRow[]> {
   const windowDays = options.windowDays ?? DEFAULT_WINDOW_DAYS;
   // The farm's own lead time, not a guess. Falls back to the documented default
-  // only if the organisation row has somehow gone missing.
-  const leadTimeDays =
+  // only if the organisation row has somehow gone missing. It is the FALLBACK
+  // here rather than the answer — see leadTimeForCategory below, which prefers
+  // the quickest supplier who actually sells the item.
+  const farmLeadTimeDays =
     options.leadTimeDays ??
     (
       await db.organisation.findUnique({
@@ -163,6 +177,12 @@ export async function stockOverview(
     )?.stockLeadTimeDays ??
     DEFAULT_LEAD_TIME_DAYS;
   const horizon = options.expiryHorizonDays ?? 60;
+
+  // Two extra queries for the whole store, not two per item.
+  const [suppliers, incoming] = await Promise.all([
+    supplierLeadTimes(principal),
+    incomingByItem(principal, asOf),
+  ]);
 
   const windowStart = new Date(
     Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate()) -
@@ -222,13 +242,24 @@ export async function stockOverview(
     const cover = rate === null ? null : daysOfCover(item.onHandBase, rate.perDay);
     const itemBatches = batchesByItem.get(item.id) ?? [];
 
+    // The lead time that matters for THIS item is the one of whoever actually
+    // sells it — not one farm-wide average covering a feed mill a fortnight
+    // away and a hardware shop in the next street.
+    const leadTime = leadTimeForCategory(item.category, suppliers, farmLeadTimeDays);
+    const onOrder = incoming.get(item.id) ?? null;
+
     return {
       ...item,
       rate,
       daysOfCover: cover,
       runsOut: runsOutOn(asOf, cover),
-      urgency: coverUrgency(cover, leadTimeDays),
-      sentence: coverSentence(cover, rate, leadTimeDays),
+      urgency: coverUrgency(cover, leadTime.days),
+      sentence: coverSentence(cover, rate, leadTime.days),
+      leadTime,
+      leadTimeSentence: leadTimeBasisSentence(leadTime),
+      // Reported next to the cover figure, never added to it.
+      incoming: onOrder,
+      incomingSentence: incomingSentence(onOrder, item.unitKey),
       expired: expiredBatches(itemBatches, asOf),
       expiringSoon: expiringSoon(itemBatches, asOf, horizon),
     };

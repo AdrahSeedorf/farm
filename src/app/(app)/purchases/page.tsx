@@ -50,8 +50,9 @@ export default async function PurchasesPage() {
       </div>
 
       {open.length > 0 ? (
-        <p
-          className={`mt-6 rounded-control border px-4 py-3 text-[14px] ${
+        <Link
+          href="/purchases/outstanding"
+          className={`mt-6 block rounded-control border px-4 py-3 text-[14px] ${
             late.length > 0
               ? 'border-status-attention bg-status-attention-bg font-medium text-status-attention'
               : 'border-border-default bg-surface-card text-text-secondary'
@@ -59,8 +60,9 @@ export default async function PurchasesPage() {
         >
           {late.length > 0
             ? `${late.length} order${late.length === 1 ? ' is' : 's are'} past the date agreed with the supplier.`
-            : `${open.length} order${open.length === 1 ? '' : 's'} out with suppliers, none of them late.`}
-        </p>
+            : `${open.length} order${open.length === 1 ? '' : 's'} out with suppliers, none of them late.`}{' '}
+          <span className="font-semibold underline underline-offset-2">See what is still to come</span>
+        </Link>
       ) : null}
 
       {orders.length === 0 ? (

@@ -167,6 +167,32 @@ export default async function InventoryPage({
                       >
                         {item.sentence}
                       </p>
+                      {/* WHAT IS ON ITS WAY, on its own line and never added to
+                          what is on hand. Three days of feed with twenty bags
+                          due tomorrow is a different morning from three days
+                          with nothing coming, and the person needs both
+                          figures rather than one blended one. */}
+                      {item.incoming ? (
+                        <p
+                          className={`mt-0.5 text-[13px] ${
+                            item.incoming.anyLate
+                              ? 'font-medium text-status-attention'
+                              : 'text-text-secondary'
+                          }`}
+                        >
+                          {item.incomingSentence}
+                        </p>
+                      ) : null}
+                      {/* Whose lead time the urgency above was measured
+                          against, shown only when it is somebody's in
+                          particular — the farm's own figure is already the
+                          reader's assumption. */}
+                      {item.leadTime.supplierName &&
+                      (item.urgency === 'CRITICAL' || item.urgency === 'LOW') ? (
+                        <p className="mt-0.5 text-[13px] text-text-muted">
+                          {item.leadTimeSentence}
+                        </p>
+                      ) : null}
                       {item.expired.length > 0 ? (
                         <p className="mt-0.5 text-[13px] font-medium text-status-critical">
                           {item.expired.length} expired batch

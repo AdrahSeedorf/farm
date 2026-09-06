@@ -8,6 +8,10 @@ import {
   USAGE_MOVEMENTS,
   DEFAULT_LEAD_TIME_DAYS,
   DEFAULT_WINDOW_DAYS,
+  leadTimeForCategory,
+  leadTimeBasisSentence,
+  incomingSentence,
+  type SupplierLeadTime,
 } from '../stock-cover';
 import { daysOfCover } from '../stock-ledger';
 
@@ -177,5 +181,161 @@ describe('the window is a week, deliberately', () => {
     expect(Math.round(weekRate)).toBe(57);
     expect(Math.round(monthRate)).toBe(36);
     expect(daysOfCover(480, weekRate)!).toBeLessThan(daysOfCover(480, monthRate)!);
+  });
+});
+
+describe('whose lead time the urgency is measured against', () => {
+  const mill: SupplierLeadTime = {
+    id: 'mill',
+    name: 'Ashanti Feed Mill',
+    leadTimeDays: 14,
+    supplies: ['FEED'],
+  };
+  const kumasi: SupplierLeadTime = {
+    id: 'kumasi',
+    name: 'Kumasi Agro',
+    leadTimeDays: 3,
+    supplies: ['FEED', 'MEDICINE'],
+  };
+  const shop: SupplierLeadTime = {
+    id: 'shop',
+    name: 'Edubiase Hardware',
+    leadTimeDays: 1,
+    supplies: ['SPARE_PART'],
+  };
+
+  it('THE QUICKEST SUPPLIER WHO ACTUALLY SELLS IT', () => {
+    // The question this feeds is "will I run out before a delivery ordered
+    // today could arrive?". If somebody can get feed here in three days, three
+    // days is the honest answer — even if the farm usually buys from the mill.
+    const basis = leadTimeForCategory('FEED', [mill, kumasi, shop], 7);
+    expect(basis.days).toBe(3);
+    expect(basis.supplierName).toBe('Kumasi Agro');
+  });
+
+  it('AND SAYS WHOSE FIGURE IT IS, so the person can disagree with it', () => {
+    // The cheaper supplier may take a fortnight, and choosing them is the
+    // farmer's call. They can only make it if the screen shows the assumption.
+    const basis = leadTimeForCategory('FEED', [mill, kumasi], 7);
+    expect(leadTimeBasisSentence(basis)).toMatch(/Kumasi Agro/);
+    expect(leadTimeBasisSentence(basis)).toMatch(/quickest supplier/i);
+  });
+
+  it('falls back to the farm’s own figure when nobody is recorded', () => {
+    // Which, on a farm that has only just started writing suppliers down, is
+    // most items — so the fallback must read as an ordinary state, not a fault.
+    const basis = leadTimeForCategory('PACKAGING', [mill, kumasi, shop], 7);
+    expect(basis.days).toBe(7);
+    expect(basis.supplierName).toBeNull();
+    expect(leadTimeBasisSentence(basis)).toMatch(/no supplier is recorded/i);
+  });
+
+  it('and when there are no suppliers at all', () => {
+    expect(leadTimeForCategory('FEED', [], 7)).toEqual({ days: 7, supplierName: null });
+  });
+
+  it('CHANGES THE VERDICT, which is the whole point', () => {
+    // Four days of feed is an emergency against a fourteen-day mill and
+    // perfectly comfortable against a three-day one. A single farm-wide figure
+    // gets one of those two farms wrong every time.
+    // CRITICAL means "you will run out before a delivery ordered today can
+    // arrive". Against the mill that is true of four days; against Kumasi it is
+    // not — four days there is merely inside the window where ordering starts.
+    expect(coverUrgency(4, leadTimeForCategory('FEED', [mill], 7).days)).toBe('CRITICAL');
+    expect(coverUrgency(4, leadTimeForCategory('FEED', [kumasi], 7).days)).toBe('LOW');
+    // And a week of feed is a quiet morning against Kumasi and still an
+    // emergency against the mill.
+    expect(coverUrgency(7, leadTimeForCategory('FEED', [kumasi], 7).days)).toBe('OK');
+    expect(coverUrgency(7, leadTimeForCategory('FEED', [mill], 7).days)).toBe('CRITICAL');
+  });
+});
+
+describe('what is already on its way', () => {
+  it('says nothing is coming when nothing is', () => {
+    expect(incomingSentence(null, 'bag_50kg')).toBe('Nothing on order.');
+    expect(
+      incomingSentence(
+        { quantityBase: 0, earliestExpectedOn: null, orderCount: 0, orderNumber: null, anyLate: false },
+        'bag_50kg',
+      ),
+    ).toBe('Nothing on order.');
+  });
+
+  it('CONVERTS BASE UNITS INTO THE UNIT THE ITEM IS COUNTED IN', () => {
+    // A thousand kilograms on order is TWENTY BAGS. The first version of this
+    // function printed the base figure with the display label — "1000 bag 50kg"
+    // — and the browser suite is what caught it. Same trap as the receipts.
+    expect(
+      incomingSentence(
+        {
+          quantityBase: 1000,
+          earliestExpectedOn: d('2026-09-19'),
+          orderCount: 1,
+          orderNumber: 'PO-2026-0001',
+          anyLate: false,
+        },
+        'bag_50kg',
+      ),
+    ).toBe('20 bag 50kg PO-2026-0001, due 2026-09-19.');
+  });
+
+  it('names the order and the date', () => {
+    expect(
+      incomingSentence(
+        {
+          quantityBase: 400,
+          earliestExpectedOn: d('2026-09-19'),
+          orderCount: 1,
+          orderNumber: 'PO-2026-0001',
+          anyLate: false,
+        },
+        'kg',
+      ),
+    ).toBe('400 kg PO-2026-0001, due 2026-09-19.');
+  });
+
+  it('counts across several orders without naming one of them', () => {
+    expect(
+      incomingSentence(
+        {
+          quantityBase: 900,
+          earliestExpectedOn: d('2026-09-19'),
+          orderCount: 3,
+          orderNumber: 'PO-2026-0001',
+          anyLate: false,
+        },
+        'kg',
+      ),
+    ).toMatch(/across 3 orders/);
+  });
+
+  it('LEADS WITH LATENESS, because that is the actionable half', () => {
+    expect(
+      incomingSentence(
+        {
+          quantityBase: 400,
+          earliestExpectedOn: d('2026-09-01'),
+          orderCount: 1,
+          orderNumber: 'PO-2026-0001',
+          anyLate: true,
+        },
+        'kg',
+      ),
+    ).toMatch(/already past the date agreed. Worth a phone call/);
+  });
+
+  it('says so plainly when no date was agreed', () => {
+    expect(
+      incomingSentence(
+        {
+          quantityBase: 400,
+          earliestExpectedOn: null,
+          orderCount: 1,
+          orderNumber: 'PO-2026-0001',
+          anyLate: false,
+        },
+        'kg',
+      ),
+    ).toMatch(/no delivery date agreed/i);
   });
 });

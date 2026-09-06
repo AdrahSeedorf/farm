@@ -1,4 +1,5 @@
 import type { StockMovementType } from '@/lib/stock-ledger';
+import { fromBase } from '@/lib/uom';
 
 /**
  * Days of cover — ADRAH Farms
@@ -168,4 +169,122 @@ export function coverSentence(
     return `About ${rounded} days left ${basis} — less than the ${leadTimeDays} days a delivery takes.`;
   }
   return `About ${rounded} days left ${basis}.`;
+}
+
+// ---------------------------------------------------------------------------
+// WHOSE LEAD TIME?
+// ---------------------------------------------------------------------------
+
+export interface SupplierLeadTime {
+  id: string;
+  name: string;
+  /** The figure actually in force for this supplier — its own, or the farm's. */
+  leadTimeDays: number;
+  /** Item categories this supplier sells. Empty means nobody has said. */
+  supplies: string[];
+}
+
+export interface LeadTimeBasis {
+  days: number;
+  /** Null when the farm-wide figure is standing in. */
+  supplierName: string | null;
+}
+
+/**
+ * How quickly THIS item could actually be here.
+ *
+ * The farm-wide figure treats a feed mill two weeks away and a hardware shop in
+ * the next street as the same thing. That single number then decides whether
+ * four days of feed reads as comfortable or as an emergency, so it is worth
+ * getting closer to the truth than one average for everything.
+ *
+ * THE FASTEST SUPPLIER WHO ACTUALLY SELLS IT, and the answer says whose figure
+ * it is.
+ *
+ *   Fastest, not slowest or average, because the question this feeds is "will I
+ *   run out before a delivery ordered today could arrive?" — and if somebody can
+ *   get it here in three days, then three days is the honest answer. The person
+ *   may well prefer the cheaper supplier who takes a fortnight; that is their
+ *   call to make, and they can only make it if the screen says which supplier
+ *   the figure came from. So it does.
+ *
+ * Falls back to the farm's own figure when no supplier is recorded as selling
+ * this category — which, on a farm that has only just started writing suppliers
+ * down, is most of them.
+ */
+export function leadTimeForCategory(
+  category: string,
+  suppliers: SupplierLeadTime[],
+  farmLeadTimeDays: number,
+): LeadTimeBasis {
+  const able = suppliers.filter((s) => s.supplies.includes(category));
+  if (able.length === 0) return { days: farmLeadTimeDays, supplierName: null };
+
+  const fastest = able.reduce((best, s) => (s.leadTimeDays < best.leadTimeDays ? s : best));
+  return { days: fastest.leadTimeDays, supplierName: fastest.name };
+}
+
+/** Where the lead time behind an urgency figure came from, in words. */
+export function leadTimeBasisSentence(basis: LeadTimeBasis): string {
+  const days = `${basis.days} day${basis.days === 1 ? '' : 's'}`;
+  return basis.supplierName === null
+    ? `Measured against the farm’s own ${days} — no supplier is recorded as selling this.`
+    : `Measured against ${basis.supplierName}, the quickest supplier recorded for this, at ${days}.`;
+}
+
+// ---------------------------------------------------------------------------
+// WHAT IS ALREADY ON ITS WAY
+// ---------------------------------------------------------------------------
+
+export interface Incoming {
+  /** Outstanding quantity across every open order, in the item's BASE unit. */
+  quantityBase: number;
+  /** The earliest date any of it was promised for. Null when none was agreed. */
+  earliestExpectedOn: Date | null;
+  /** How many orders it is spread across. */
+  orderCount: number;
+  /** The reference to quote when chasing — the earliest, or the only, one. */
+  orderNumber: string | null;
+  /** True when at least one of those orders is already past its agreed date. */
+  anyLate: boolean;
+}
+
+/**
+ * What is on order but not yet delivered.
+ *
+ * NEVER ADDED TO WHAT IS ON HAND. An order is an expectation and stock on hand
+ * is a fact, and a store that counts feed still sitting at the mill as feed it
+ * has is a store that runs out while its own screen says it is comfortable.
+ *
+ * It is reported ALONGSIDE the cover figure instead, because the two together
+ * are what somebody actually acts on: three days of feed with twenty bags due
+ * tomorrow is a different morning from three days of feed with nothing coming.
+ */
+export function incomingSentence(incoming: Incoming | null, unitKey: string): string {
+  if (incoming === null || incoming.quantityBase <= 0) {
+    return 'Nothing on order.';
+  }
+
+  // THE CONVERSION HAPPENS HERE, not at the call site. `quantityBase` is in the
+  // dimension's base unit and `unitKey` is what the item is counted in — a
+  // thousand kilograms is twenty bags — and a caller that formatted the base
+  // figure with the display label would print "1000 bag 50kg" for twenty bags.
+  // Which is exactly what the first version of this line did.
+  const amount = `${round(fromBase(incoming.quantityBase, unitKey))} ${unitKey.replace(/_/g, ' ')}`;
+  const where =
+    incoming.orderCount > 1
+      ? `across ${incoming.orderCount} orders`
+      : (incoming.orderNumber ?? 'on order');
+
+  if (incoming.anyLate) {
+    return `${amount} ${where} — already past the date agreed. Worth a phone call.`;
+  }
+  if (incoming.earliestExpectedOn === null) {
+    return `${amount} ${where}, with no delivery date agreed.`;
+  }
+  return `${amount} ${where}, due ${incoming.earliestExpectedOn.toISOString().slice(0, 10)}.`;
+}
+
+function round(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }

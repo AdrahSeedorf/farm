@@ -3,7 +3,8 @@ import { db } from '@/lib/db';
 import type { Principal } from '@/lib/rbac';
 import { orgFilter, siteFilter, siteIdFilter, canAccessSite } from '@/lib/scope';
 import { fromCedis, type Pesewas } from '@/lib/money';
-import { fromBase } from '@/lib/uom';
+import { fromBase, toBase } from '@/lib/uom';
+import type { Incoming, SupplierLeadTime } from '@/lib/stock-cover';
 import {
   orderNumberFor,
   sequenceOf,
@@ -13,6 +14,7 @@ import {
   fulfilmentSentence,
   orderTiming,
   timingSentence,
+  outstandingOf,
   suggestedDelivery,
   type OrderLine,
   type OrderState,
@@ -545,4 +547,102 @@ export async function cancelOrder(
 /** Quantities are floats; tidy the arithmetic dust. */
 function round(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+// ---------------------------------------------------------------------------
+// THE CHASING LIST
+// ---------------------------------------------------------------------------
+
+/**
+ * Orders that are out with a supplier and not yet fully delivered.
+ *
+ * SENT ONLY. A draft is not out with anybody, and a cancelled order is not
+ * something to chase — putting either on this list would mean the list stops
+ * being read, and then the one genuinely late delivery goes unchased with it.
+ *
+ * Sorted by how late they are, latest first, then by the date promised. The
+ * order somebody should ring about is at the top.
+ */
+export async function outstandingOrders(
+  principal: Principal,
+  asOf: Date = new Date(),
+): Promise<OrderRow[]> {
+  const orders = await listOrders(principal, { state: 'SENT', asOf });
+  return orders
+    .filter((o) => o.fulfilment !== 'COMPLETE' && o.fulfilment !== 'OVER')
+    .sort((a, b) => {
+      const late = (o: OrderRow) => o.timing.daysLate ?? -(o.timing.daysToGo ?? 9_999);
+      return late(b) - late(a);
+    });
+}
+
+/**
+ * What is on order for each item, keyed by item id.
+ *
+ * Feeds the store screen. Only SENT orders count: a draft is a shopping list,
+ * and counting it as stock on its way is how somebody decides not to order.
+ */
+export async function incomingByItem(
+  principal: Principal,
+  asOf: Date = new Date(),
+): Promise<Map<string, Incoming>> {
+  const orders = await listOrders(principal, { state: 'SENT', asOf });
+  const byItem = new Map<string, Incoming>();
+
+  for (const order of orders) {
+    for (const line of order.lines) {
+      const outstanding = outstandingOf(line);
+      if (outstanding <= 0) continue;
+
+      // BASE UNITS, because that is what the store screen holds its quantities
+      // in. Adding a bag figure to a kilogram figure is the mistake this whole
+      // module keeps guarding against.
+      const outstandingBase = toBase(outstanding, line.unitKey);
+
+      const current = byItem.get(line.itemId);
+      const isEarlier =
+        current?.earliestExpectedOn == null ||
+        (order.expectedOn !== null && order.expectedOn < current.earliestExpectedOn);
+
+      byItem.set(line.itemId, {
+        quantityBase: round((current?.quantityBase ?? 0) + outstandingBase),
+        earliestExpectedOn: isEarlier
+          ? order.expectedOn
+          : (current?.earliestExpectedOn ?? null),
+        orderCount: (current?.orderCount ?? 0) + 1,
+        orderNumber: isEarlier ? order.orderNumber : (current?.orderNumber ?? null),
+        anyLate: (current?.anyLate ?? false) || order.timing.status === 'LATE',
+      });
+    }
+  }
+
+  return byItem;
+}
+
+/**
+ * Every active supplier's effective lead time and what they sell.
+ *
+ * One query, handed to `leadTimeForCategory` per item — rather than a lookup
+ * per item, which on a fifty-item store is fifty round trips to a database in
+ * Europe.
+ */
+export async function supplierLeadTimes(principal: Principal): Promise<SupplierLeadTime[]> {
+  const [suppliers, org] = await Promise.all([
+    db.supplier.findMany({
+      where: { ...orgFilter(principal), isActive: true },
+      select: { id: true, name: true, leadTimeDays: true, supplies: true },
+    }),
+    db.organisation.findUnique({
+      where: { id: principal.organisationId },
+      select: { stockLeadTimeDays: true },
+    }),
+  ]);
+
+  const farmDefault = org?.stockLeadTimeDays ?? 7;
+  return suppliers.map((s) => ({
+    id: s.id,
+    name: s.name,
+    leadTimeDays: s.leadTimeDays ?? farmDefault,
+    supplies: s.supplies as string[],
+  }));
 }

@@ -27,22 +27,53 @@ export const LIMITS = {
   windowMinutes: 15,
 } as const;
 
+/**
+ * The same shape, tighter, for PIN sign-in.
+ *
+ * A PIN is six digits — a million possibilities against a password's effectively
+ * unbounded space — so the limit is doing far more of the work here and has to
+ * be set accordingly. Five attempts in fifteen minutes is 480 a day, which puts
+ * half of a six-digit space about 2.9 years away. See PIN_MIN_LENGTH in pin.ts
+ * for the full arithmetic and for why that number is stated rather than rounded
+ * up into a comfortable one.
+ *
+ * Five is also more than a farmhand needs: somebody who has genuinely forgotten
+ * their PIN is not helped by a sixth guess, they are helped by the manager
+ * resetting it.
+ *
+ * DELIBERATELY NOT AN ESCALATING LOCKOUT. Doubling the window on each block
+ * would raise that 2.9 years considerably, and it would also mean the one person
+ * who has to record a mortality at half five in the morning can be locked out
+ * for four hours by somebody else's mistyping. The farm loses more from that
+ * than it gains, and the manager reset is the escape valve either way.
+ *
+ * The per-IP figure is LOWER than for passwords, not higher, because every staff
+ * phone on the farm shares one network and a spray across accounts is exactly
+ * the attack this catches.
+ */
+export const PIN_LIMITS = {
+  perAccount: 5,
+  perIp: 15,
+  windowMinutes: 15,
+} as const;
+
+/** Attempts a single account gets per day at the PIN limit — used in the wording. */
+export const PIN_ATTEMPTS_PER_DAY =
+  (PIN_LIMITS.perAccount * (24 * 60)) / PIN_LIMITS.windowMinutes;
+
 export interface RateLimitResult {
   allowed: boolean;
   /** Seconds until the caller may try again. Only meaningful when blocked. */
   retryAfterSeconds: number;
 }
 
-function windowStart(): Date {
-  return new Date(Date.now() - LIMITS.windowMinutes * 60_000);
-}
-
 /** Check both limits before verifying any password. */
 export async function checkLoginRateLimit(
   identifier: string,
   ipAddress: string | null,
+  limits: { perAccount: number; perIp: number; windowMinutes: number } = LIMITS,
 ): Promise<RateLimitResult> {
-  const since = windowStart();
+  const since = new Date(Date.now() - limits.windowMinutes * 60_000);
   const key = identifier.trim().toLowerCase();
 
   const [accountFailures, ipFailures] = await Promise.all([
@@ -56,7 +87,7 @@ export async function checkLoginRateLimit(
       : Promise.resolve(0),
   ]);
 
-  const blocked = accountFailures >= LIMITS.perAccount || ipFailures >= LIMITS.perIp;
+  const blocked = accountFailures >= limits.perAccount || ipFailures >= limits.perIp;
   if (!blocked) return { allowed: true, retryAfterSeconds: 0 };
 
   // Time until the oldest failure in the window falls out of it.
@@ -64,7 +95,7 @@ export async function checkLoginRateLimit(
     where: {
       successful: false,
       createdAt: { gte: since },
-      ...(accountFailures >= LIMITS.perAccount
+      ...(accountFailures >= limits.perAccount
         ? { identifier: key }
         : { ipAddress: ipAddress ?? undefined }),
     },
@@ -73,8 +104,8 @@ export async function checkLoginRateLimit(
   });
 
   const expiresAt = oldest
-    ? oldest.createdAt.getTime() + LIMITS.windowMinutes * 60_000
-    : Date.now() + LIMITS.windowMinutes * 60_000;
+    ? oldest.createdAt.getTime() + limits.windowMinutes * 60_000
+    : Date.now() + limits.windowMinutes * 60_000;
 
   return {
     allowed: false,

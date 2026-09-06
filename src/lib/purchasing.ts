@@ -119,8 +119,14 @@ export function fulfilmentOf(lines: OrderLine[]): Fulfilment {
   return lines.every((l) => outstandingOf(l) === 0) ? 'COMPLETE' : 'PART';
 }
 
-/** What is still outstanding, line by line, for the chasing list. */
-export function outstandingLines(lines: OrderLine[]): OrderLine[] {
+/**
+ * What is still outstanding, line by line, for the chasing list.
+ *
+ * Generic so it hands back the CALLER'S row type rather than flattening it to
+ * the bare OrderLine — the chasing screen needs the row id to key its list, and
+ * a signature that threw that away would push the caller into a second lookup.
+ */
+export function outstandingLines<T extends OrderLine>(lines: T[]): T[] {
   return lines.filter((l) => outstandingOf(l) > 0);
 }
 

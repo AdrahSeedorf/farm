@@ -34,8 +34,14 @@ const OPTIONS: Options = {
 /** Minimum length. Length beats complexity rules — NIST SP 800-63B agrees. */
 export const MIN_PASSWORD_LENGTH = 10;
 
-/** Farm staff PINs. Short by necessity, so rate limiting carries the security. */
-export const PIN_LENGTH = 4;
+/**
+ * PIN LENGTH LIVES IN pin.ts, not here.
+ *
+ * It was four in this file until Milestone 12, unused. Four digits is 10,000
+ * possibilities and falls to about ten days of unattended grinding at the
+ * sign-in limit, so it became six with the arithmetic written down beside it.
+ * See PIN_MIN_LENGTH in src/lib/pin.ts.
+ */
 
 export class PasswordError extends Error {
   constructor(message: string) {
@@ -51,6 +57,27 @@ export async function hashPassword(plain: string): Promise<string> {
     );
   }
   return hash(plain, OPTIONS);
+}
+
+/**
+ * Hash a PIN.
+ *
+ * SAME ARGON2ID, SAME COST as a password — deliberately. A PIN is a weaker
+ * secret, which is an argument for hashing it at least as hard, not less. The
+ * length rule that a password gets is skipped because a PIN has its own, stricter
+ * one; `pinErrors` in pin.ts is what enforces it, and nothing should reach here
+ * without having passed through it.
+ */
+export async function hashPin(pin: string): Promise<string> {
+  if (!/^\d{4,12}$/.test(pin)) {
+    throw new PasswordError('A PIN is digits only.');
+  }
+  return hash(pin, OPTIONS);
+}
+
+/** Verify a PIN. Same never-throws contract as `verifyPassword`. */
+export async function verifyPin(storedHash: string, pin: string): Promise<boolean> {
+  return verifyPassword(storedHash, pin);
 }
 
 /**

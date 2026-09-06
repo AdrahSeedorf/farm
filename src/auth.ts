@@ -2,7 +2,8 @@ import NextAuth from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import { z } from 'zod';
 import { db } from '@/lib/db';
-import { verifyPassword, burnTime } from '@/lib/password';
+import { verifyPassword, verifyPin, burnTime } from '@/lib/password';
+import { toE164 } from '@/lib/ghana';
 import type { Role } from '@/lib/rbac';
 
 /**
@@ -31,6 +32,11 @@ import type { Role } from '@/lib/rbac';
 const credentialsSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1),
+});
+
+const pinSchema = z.object({
+  phone: z.string().trim().min(1),
+  pin: z.string().trim().regex(/^\d+$/),
 });
 
 /** Shape stored in the token and exposed on the session. */
@@ -107,6 +113,54 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         if (!user.isActive) return null;
 
         return { id: user.id, email: user.email, name: user.name };
+      },
+    }),
+
+    /**
+     * Phone + PIN, for farm staff who have no email address.
+     *
+     * A SEPARATE PROVIDER, not a second branch inside the one above. Two
+     * credentials with different strengths, different rate limits and different
+     * failure messages sharing one `authorize` is how a rate limit meant for
+     * PINs eventually gets applied to passwords, or worse, the other way round.
+     *
+     * THE PIN IS ONLY ONE OF THREE THINGS holding this shut. The other two are
+     * the tighter limit in rate-limit.ts and the rule in pin.ts that no account
+     * able to see money or change access may hold a PIN at all. None of them is
+     * sufficient alone and the comment is here so nobody removes one thinking
+     * the others cover it.
+     */
+    Credentials({
+      id: 'pin',
+      name: 'Phone and PIN',
+      credentials: {
+        phone: { label: 'Phone', type: 'tel' },
+        pin: { label: 'PIN', type: 'password' },
+      },
+      async authorize(raw) {
+        const parsed = pinSchema.safeParse(raw);
+        if (!parsed.success) return null;
+
+        // Normalised, so "024 123 4567" and "+233241234567" are one account and
+        // one rate-limit key rather than two of each.
+        const phone = toE164(parsed.data.phone);
+        if (!phone) return null;
+
+        const user = await db.user.findUnique({
+          where: { phone },
+          select: { id: true, name: true, phone: true, pinHash: true, isActive: true },
+        });
+
+        if (!user?.pinHash) {
+          await burnTime(parsed.data.pin);
+          return null;
+        }
+
+        const ok = await verifyPin(user.pinHash, parsed.data.pin);
+        if (!ok) return null;
+        if (!user.isActive) return null;
+
+        return { id: user.id, name: user.name };
       },
     }),
   ],
