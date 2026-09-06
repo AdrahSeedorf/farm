@@ -71,6 +71,7 @@ model Organisation {
   biosecurityChecklists BiosecurityChecklist[]
   suppliers       Supplier[]
   purchaseOrders  PurchaseOrder[]
+  attendance      AttendanceEvent[]
 }
 
 model Site {
@@ -108,6 +109,7 @@ model Site {
   cleaningRecords CleaningRecord[]
   biosecurityChecks BiosecurityCheck[]
   purchaseOrders    PurchaseOrder[]
+  attendance        AttendanceEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1266,6 +1268,8 @@ model User {
   ordersPlaced       PurchaseOrder[]    @relation("PurchaseOrderPlacedBy")
   ordersSent         PurchaseOrder[]    @relation("PurchaseOrderSentBy")
   ordersCancelled    PurchaseOrder[]    @relation("PurchaseOrderCancelledBy")
+  attendance         AttendanceEvent[]  @relation("AttendanceSubject")
+  attendanceRecorded AttendanceEvent[]  @relation("AttendanceRecorder")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1813,4 +1817,73 @@ model PurchaseOrderLine {
   /// which of them to draw down.
   @@unique([purchaseOrderId, itemId])
   @@index([itemId])
+}
+
+// ---------------------------------------------------------------------------
+// ATTENDANCE
+// ---------------------------------------------------------------------------
+
+enum AttendanceEventType {
+  CLOCK_IN
+  CLOCK_OUT
+}
+
+/// Who was on the farm, and when.
+///
+/// AN APPEND-ONLY LEDGER, exactly like population and stock. There is no
+/// `isClockedIn` column and no Shift table: a shift is a CLOCK_IN and the
+/// CLOCK_OUT that follows it, worked out on read by `pairShifts`. A stored
+/// boolean and a ledger eventually disagree, and the boolean is always the one
+/// that is wrong.
+///
+/// THERE IS NO LATITUDE OR LONGITUDE HERE, and that is a decision rather than an
+/// omission. Clock-in is the obvious place to reach for GPS; the brief was
+/// explicit that geofencing is discussed before it is built, and a nullable
+/// "for later" column is how that discussion gets skipped.
+///
+/// NOTHING IN THIS TABLE IS ABOUT PAY. Hours are elapsed, never payable.
+model AttendanceEvent {
+  id             String              @id @default(cuid())
+  organisationId String
+  /// Whose attendance this is — not necessarily who recorded it.
+  userId         String
+  /// Which farm they turned up at.
+  siteId         String
+  type           AttendanceEventType
+
+  /// The instant it happened. A timestamp, not a date, because a night shift
+  /// crosses midnight and the two ends belong to different calendar days.
+  occurredAt DateTime
+
+  /// The farm-local day the SHIFT belongs to, stamped at write time.
+  ///
+  /// A watchman coming on at seven in the evening and leaving at six belongs to
+  /// the night he started, not to two half-days either side of midnight. Stamped
+  /// rather than derived on read so that "the week of the 6th" means the same
+  /// thing in every query. See shiftDayOf() in src/lib/attendance.ts.
+  shiftDay DateTime @db.Date
+
+  notes String?
+
+  /// Who actually pressed the button.
+  ///
+  /// Equal to `userId` for an ordinary clock-in. DIFFERENT when a supervisor
+  /// closed a shift somebody forgot to close, which is the common case and must
+  /// be visible as such — an entry made on somebody's behalf is a different kind
+  /// of fact from one they made themselves, and a record that cannot tell them
+  /// apart is a record nobody can dispute.
+  recordedById String
+  /// Why somebody else recorded it. Required by the service in that case.
+  correctionReason String?
+
+  createdAt DateTime @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  user         User         @relation("AttendanceSubject", fields: [userId], references: [id])
+  recordedBy   User         @relation("AttendanceRecorder", fields: [recordedById], references: [id])
+  site         Site         @relation(fields: [siteId], references: [id])
+
+  @@index([organisationId, shiftDay])
+  @@index([userId, occurredAt])
+  @@index([siteId, shiftDay])
 }
