@@ -165,3 +165,67 @@ export const cancelOrderSchema = z.object({
     .min(3, 'Say why it was cancelled. In three months this is the only explanation there is.')
     .max(200),
 });
+
+/**
+ * A delivery recorded AGAINST an order line.
+ *
+ * Distinct from `receiptSchema` in validation/receipt.ts, which handles a
+ * delivery nobody ordered through the system — a bag bought at the market on
+ * the way home. That path stays: not every delivery has an order behind it, and
+ * forcing one would mean either fake orders or unrecorded stock.
+ *
+ * What this one adds is the LINE it is being matched against. Everything else
+ * about how the stock enters the ledger is identical, and deliberately so.
+ */
+export const orderReceiptSchema = z.object({
+  lineId: z.string().trim().min(1, 'Choose what arrived.'),
+  stockLocationId: z.string().trim().min(1, 'Choose a store.'),
+  /** How much arrived, IN THE UNIT THE LINE WAS ORDERED IN. */
+  quantity: z
+    .string()
+    .trim()
+    .min(1, 'Enter how much arrived.')
+    .transform((v) => Number(v))
+    .refine(
+      (v) => Number.isFinite(v) && v > 0 && v <= 10_000_000,
+      'Enter a quantity greater than zero.',
+    ),
+  occurredOn: isoDate.refine(
+    (d) => d.getTime() <= todayUtc().getTime(),
+    'A delivery cannot be recorded for a future date.',
+  ),
+  batchNumber: optionalText(40),
+  /** May be in the future — that is the normal case — or in the past. */
+  expiresOn: z
+    .union([isoDate, z.literal('')])
+    .optional()
+    .transform((v) => (v === '' || v === undefined ? null : (v as Date))),
+  /**
+   * What was actually invoiced, per ordered unit, in cedis.
+   *
+   * THIS IS THE PRICE THAT ENTERS STOCK, not the one on the order. The order
+   * is what the farm expected to pay; the delivery note is what it did pay, and
+   * a stock valuation built on the expectation would be wrong by exactly the
+   * amount worth knowing about.
+   */
+  priceCedis: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v === undefined || v === '' ? null : Number(v)))
+    .refine(
+      (v) => v === null || (Number.isFinite(v) && v >= 0 && v <= 100_000_000),
+      'Enter a price in cedis, or leave it blank if the invoice has not arrived.',
+    ),
+  /** Waybill or invoice number. */
+  reference: optionalText(120),
+  notes: optionalText(500),
+  /** The fingerprint of the warnings the person was actually shown. */
+  acknowledgedToken: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v === '' || v === undefined ? null : v)),
+});
+
+export type OrderReceiptInput = z.infer<typeof orderReceiptSchema>;

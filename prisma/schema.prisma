@@ -942,6 +942,10 @@ model StockMovement {
   @@index([itemId, occurredOn])
   @@index([stockLocationId, itemId])
   @@index([itemBatchId])
+  /// What a movement came FROM: a daily record, a production record, a purchase
+  /// order line. Indexed because "how much of this order has actually arrived?"
+  /// is a query over exactly this pair, run on every order screen.
+  @@index([sourceType, sourceId])
 }
 
 /// A breed, and the growth curve its breeder publishes for it.

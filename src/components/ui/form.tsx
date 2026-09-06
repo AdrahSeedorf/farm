@@ -45,7 +45,16 @@ export function Field({
       {hint ? <p className="mt-0.5 text-[13px] text-text-muted">{hint}</p> : null}
       <div className="mt-1.5">{children}</div>
       {error ? (
-        <p id={`${htmlFor}-error`} className="mt-1 text-[13px] text-status-critical">
+        // role="alert" because this text appears AFTER a submission, in
+        // response to something the person did. Without it a screen reader
+        // announces nothing at all and the form simply seems not to work —
+        // which on a phone, in a poultry house, is indistinguishable from a
+        // dropped connection.
+        <p
+          id={`${htmlFor}-error`}
+          role="alert"
+          className="mt-1 text-[13px] text-status-critical"
+        >
           {error}
         </p>
       ) : null}

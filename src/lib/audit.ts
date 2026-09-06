@@ -36,6 +36,7 @@ export type AuditAction =
   | 'order.line.remove'
   | 'order.send'
   | 'order.cancel'
+  | 'order.receive'
   | 'item.create'
   | 'item.update'
   | 'item.archive'

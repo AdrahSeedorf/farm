@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import type { Principal } from '@/lib/rbac';
 import { orgFilter, siteFilter, siteIdFilter, canAccessSite } from '@/lib/scope';
 import { fromCedis, type Pesewas } from '@/lib/money';
+import { fromBase } from '@/lib/uom';
 import {
   orderNumberFor,
   sequenceOf,
@@ -42,6 +43,15 @@ const DIMENSION_WORD: Record<string, string> = {
   MASS: 'weight',
   VOLUME: 'volume',
 };
+
+/**
+ * What a stock movement records as its origin when it came in against an order.
+ *
+ * One constant, because it is written in the receiving service and read in the
+ * "what has arrived?" query, and a typo in either would silently report that
+ * nothing had ever been delivered.
+ */
+export const RECEIPT_SOURCE_TYPE = 'purchaseOrderLine';
 
 export class OrderError extends Error {
   constructor(message: string) {
@@ -109,16 +119,41 @@ function findOrders(where: object) {
   });
 }
 
+/** How much has arrived against each line, KEYED BY LINE ID, in base units. */
+export type ReceivedByLine = Map<string, number>;
+
 /**
- * Turn a database row into something the screens can render.
+ * What has actually arrived against a set of order lines.
  *
- * `quantityReceived` IS ZERO HERE, deliberately and temporarily. Receipts are
- * matched against order lines at Task 11.4; until that exists, reporting a
- * guess would be worse than reporting nothing. Every derived figure below
- * already flows from this field, so the screens do not change when it becomes
- * real.
+ * THE TRAP THIS FUNCTION EXISTS TO AVOID. The ledger stores every movement in
+ * the DIMENSION'S BASE UNIT — kilograms, pieces, litres. An order line is in
+ * the unit it was ORDERED in, which is very often not that: twenty bags of
+ * fifty is a thousand kilograms. Comparing the two numbers directly reports
+ * that fifty times too much arrived, and the same class of mistake (a crate
+ * read as a piece) has already put 7,200 eggs into this system where there
+ * were 240.
+ *
+ * So the sum is taken in base units and converted back through the LINE'S OWN
+ * ordered unit — never the item's display unit, which is a different question.
  */
-function toRow(order: DbOrder, asOf: Date): OrderRow {
+async function receivedByLine(lineIds: string[]): Promise<ReceivedByLine> {
+  if (lineIds.length === 0) return new Map();
+
+  const sums = await db.stockMovement.groupBy({
+    by: ['sourceId'],
+    where: { sourceType: RECEIPT_SOURCE_TYPE, sourceId: { in: lineIds } },
+    _sum: { deltaBase: true },
+  });
+
+  return new Map(
+    sums
+      .filter((s): s is typeof s & { sourceId: string } => s.sourceId !== null)
+      .map((s) => [s.sourceId, s._sum.deltaBase ?? 0]),
+  );
+}
+
+/** Turn a database row into something the screens can render. */
+function toRow(order: DbOrder, asOf: Date, received: ReceivedByLine): OrderRow {
   const lines: OrderLineRow[] = order.lines.map((l) => ({
     id: l.id,
     itemId: l.itemId,
@@ -126,7 +161,8 @@ function toRow(order: DbOrder, asOf: Date): OrderRow {
     quantityOrdered: l.quantityOrdered,
     unitKey: l.orderUom.key,
     unitPricePesewas: l.unitPricePesewas ?? 0,
-    quantityReceived: 0,
+    // Base units back into the ORDERED unit. See receivedByLine above.
+    quantityReceived: round(fromBase(received.get(l.id) ?? 0, l.orderUom.key)),
     notes: l.notes,
     lineTotalPesewas:
       l.unitPricePesewas === null ? null : Math.round(l.unitPricePesewas * l.quantityOrdered),
@@ -174,7 +210,8 @@ export async function listOrders(
     ...siteFilter(principal),
     ...(options.state ? { state: options.state } : {}),
   });
-  return orders.map((o) => toRow(o, asOf));
+  const received = await receivedByLine(orders.flatMap((o) => o.lines.map((l) => l.id)));
+  return orders.map((o) => toRow(o, asOf, received));
 }
 
 export async function orderById(
@@ -187,7 +224,9 @@ export async function orderById(
     ...orgFilter(principal),
     ...siteFilter(principal),
   });
-  return orders[0] ? toRow(orders[0], asOf) : null;
+  if (!orders[0]) return null;
+  const received = await receivedByLine(orders[0].lines.map((l) => l.id));
+  return toRow(orders[0], asOf, received);
 }
 
 /**
@@ -501,4 +540,9 @@ export async function cancelOrder(
     },
   });
   return { orderNumber: order.orderNumber };
+}
+
+/** Quantities are floats; tidy the arithmetic dust. */
+function round(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }

@@ -9,6 +9,8 @@ import {
   FULFILMENT_LABELS,
   whyLinesAreLocked,
   lineTotal,
+  outstandingOf,
+  overOf,
 } from '@/lib/purchasing';
 import { formatGHS, pesewas } from '@/lib/money';
 import { whatsappLink, telLink, formatGhanaPhone } from '@/lib/ghana';
@@ -31,9 +33,10 @@ export default async function OrderPage({
   const order = await orderById(principal, orderId);
   if (!order) notFound();
 
-  const [canEdit, canCreate] = await Promise.all([
+  const [canEdit, canCreate, canReceive] = await Promise.all([
     currentUserCan('procurement:edit'),
     currentUserCan('procurement:create'),
+    currentUserCan('inventory:create'),
   ]);
 
   // Only fetched when there is actually a form to fill in.
@@ -54,6 +57,15 @@ export default async function OrderPage({
             {order.orderNumber}
           </p>
         </div>
+        <div className="flex flex-wrap gap-2">
+        {canReceive && order.lines.length > 0 ? (
+          <Link
+            href={`/purchases/${order.id}/receive`}
+            className="inline-flex min-h-touch items-center rounded-control bg-brand-primary px-5 text-[15px] font-semibold text-text-inverse hover:bg-brand-primary-hover"
+          >
+            Record a delivery
+          </Link>
+        ) : null}
         {canEdit && order.state !== 'CANCELLED' ? (
           <Link
             href={`/purchases/${order.id}/edit`}
@@ -62,6 +74,7 @@ export default async function OrderPage({
             Edit details
           </Link>
         ) : null}
+        </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -192,6 +205,25 @@ export default async function OrderPage({
                         </>
                       )}
                     </p>
+                    {/* WHAT ARRIVED, on its own line and in the ordered unit.
+                        Never written over the figure above it. */}
+                    {line.quantityReceived > 0 || order.state === 'SENT' ? (
+                      <p
+                        className={`tabular mt-0.5 text-[13px] ${
+                          overOf(line) > 0
+                            ? 'font-semibold text-status-attention'
+                            : 'text-text-muted'
+                        }`}
+                      >
+                        {line.quantityReceived === 0
+                          ? 'None received yet.'
+                          : overOf(line) > 0
+                            ? `${line.quantityReceived} ${line.unitKey} received — ${overOf(line)} more than ordered.`
+                            : outstandingOf(line) === 0
+                              ? `${line.quantityReceived} ${line.unitKey} received in full.`
+                              : `${line.quantityReceived} ${line.unitKey} received, ${outstandingOf(line)} still to come.`}
+                      </p>
+                    ) : null}
                     {line.notes ? (
                       <p className="mt-0.5 text-[13px] text-text-muted">{line.notes}</p>
                     ) : null}

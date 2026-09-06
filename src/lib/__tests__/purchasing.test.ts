@@ -24,6 +24,7 @@ import {
   type OrderLine,
 } from '../purchasing';
 import { fromCedis } from '../money';
+import { fromBase } from '../uom';
 
 const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 
@@ -341,5 +342,66 @@ describe('what may still be changed', () => {
   it('and so is a cancelled one', () => {
     expect(linesAreEditable('CANCELLED')).toBe(false);
     expect(whyLinesAreLocked('CANCELLED')).toMatch(/kept as they were/i);
+  });
+});
+
+describe('THE UNIT TRAP, in the shape it actually appears', () => {
+  // The stock ledger stores everything in the dimension's BASE unit — kilograms,
+  // pieces, litres. An order line is in the unit it was ORDERED in, which is
+  // very often not that. Comparing the two directly is the bug that has already
+  // banked 7,200 eggs in this system where there were 240, and it would report
+  // an order for twenty bags as fifty times over-delivered.
+  //
+  // `fromBase` is what converts back, and it must be given the LINE'S ordered
+  // unit — never the item's display unit, which is a different question.
+
+  it('reads a thousand kilograms back as twenty bags', () => {
+    expect(fromBase(1000, 'bag_50kg')).toBe(20);
+  });
+
+  it('and 7,200 pieces back as 240 crates', () => {
+    expect(fromBase(7200, 'crate')).toBe(240);
+  });
+
+  it('SO A FULLY DELIVERED ORDER READS AS COMPLETE, not fifty times over', () => {
+    const line: OrderLine = {
+      itemId: 'feed',
+      itemName: 'Layer mash',
+      quantityOrdered: 20,
+      unitKey: 'bag_50kg',
+      unitPricePesewas: fromCedis(260),
+      // 1000 kg in the ledger, converted through the ORDERED unit.
+      quantityReceived: fromBase(1000, 'bag_50kg'),
+    };
+    expect(fulfilmentOf([line])).toBe('COMPLETE');
+    expect(overOf(line)).toBe(0);
+  });
+
+  it('and the wrong conversion would have said OVER by 980', () => {
+    // Kept as an executable statement of what the bug looks like, so a future
+    // refactor that reintroduces it fails here rather than in a store.
+    const wrong: OrderLine = {
+      itemId: 'feed',
+      itemName: 'Layer mash',
+      quantityOrdered: 20,
+      unitKey: 'bag_50kg',
+      unitPricePesewas: fromCedis(260),
+      quantityReceived: 1000, // base units compared against an ordered quantity
+    };
+    expect(fulfilmentOf([wrong])).toBe('OVER');
+    expect(overOf(wrong)).toBe(980);
+  });
+
+  it('a part delivery of half the bags reads as half', () => {
+    const line: OrderLine = {
+      itemId: 'feed',
+      itemName: 'Layer mash',
+      quantityOrdered: 20,
+      unitKey: 'bag_50kg',
+      unitPricePesewas: fromCedis(260),
+      quantityReceived: fromBase(500, 'bag_50kg'),
+    };
+    expect(fulfilmentOf([line])).toBe('PART');
+    expect(outstandingOf(line)).toBe(10);
   });
 });

@@ -13,17 +13,38 @@ import {
   cancelOrder,
   OrderError,
 } from '@/lib/order-service';
+import { receiveAgainstOrder } from '@/lib/order-receipt-service';
 import {
   orderHeaderSchema,
   orderLineSchema,
   cancelOrderSchema,
+  orderReceiptSchema,
 } from '@/lib/validation/purchasing';
+import type { Warning } from '@/lib/warnings';
 import { fieldErrorsFrom } from '@/lib/validation/site';
 
 export interface OrderFormState {
   error?: string;
   fieldErrors?: Record<string, string>;
   ok?: string;
+}
+
+export interface ReceiveFormState {
+  error?: string;
+  fieldErrors?: Record<string, string>;
+  /** Shown for confirmation. NOTHING HAS BEEN WRITTEN while these are present. */
+  warnings?: Warning[];
+  warningToken?: string;
+  saved?: {
+    /** Identifies THIS save, so the form clears itself exactly once. */
+    movementId: string;
+    itemName: string;
+    quantity: number;
+    unitKey: string;
+    batchNumber: string | null;
+    stillOutstanding: number;
+    orderComplete: boolean;
+  };
 }
 
 export async function placeOrder(
@@ -208,4 +229,46 @@ export async function killOrder(
   revalidatePath('/purchases');
   revalidatePath(`/purchases/${orderId}`);
   return { ok: `${result.orderNumber} cancelled. It stays on the record.` };
+}
+
+/**
+ * Record a delivery against a line on this order.
+ *
+ * Deliberately does NOT redirect. A lorry brings several lines at once, and
+ * bouncing back to the order after each one means re-choosing the store and the
+ * date every time — which is how the wrong store gets chosen.
+ */
+export async function receiveDelivery(
+  orderId: string,
+  _prev: ReceiveFormState,
+  formData: FormData,
+): Promise<ReceiveFormState> {
+  const principal = await requirePermission('inventory:create');
+
+  const parsed = orderReceiptSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { fieldErrors: fieldErrorsFrom(parsed.error) };
+
+  const result = await receiveAgainstOrder(principal, orderId, parsed.data);
+
+  if (result.status === 'needsConfirmation') {
+    return { warnings: result.warnings, warningToken: result.token };
+  }
+  if (result.status === 'error') return { error: result.message };
+
+  revalidatePath('/purchases');
+  revalidatePath(`/purchases/${orderId}`);
+  revalidatePath(`/purchases/${orderId}/receive`);
+  revalidatePath('/inventory');
+
+  return {
+    saved: {
+      movementId: result.movementId,
+      itemName: result.itemName,
+      quantity: result.quantity,
+      unitKey: result.unitKey,
+      batchNumber: result.batchNumber,
+      stillOutstanding: result.stillOutstanding,
+      orderComplete: result.orderComplete,
+    },
+  };
 }
