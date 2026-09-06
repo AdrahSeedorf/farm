@@ -72,6 +72,7 @@ model Organisation {
   suppliers       Supplier[]
   purchaseOrders  PurchaseOrder[]
   attendance      AttendanceEvent[]
+  tasks           Task[]
 }
 
 model Site {
@@ -110,6 +111,7 @@ model Site {
   biosecurityChecks BiosecurityCheck[]
   purchaseOrders    PurchaseOrder[]
   attendance        AttendanceEvent[]
+  tasks             Task[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1270,6 +1272,9 @@ model User {
   ordersCancelled    PurchaseOrder[]    @relation("PurchaseOrderCancelledBy")
   attendance         AttendanceEvent[]  @relation("AttendanceSubject")
   attendanceRecorded AttendanceEvent[]  @relation("AttendanceRecorder")
+  tasksAssigned      Task[]             @relation("TaskAssignee")
+  tasksCompleted     Task[]             @relation("TaskCompletedBy")
+  tasksCreated       Task[]             @relation("TaskCreatedBy")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1886,4 +1891,71 @@ model AttendanceEvent {
   @@index([organisationId, shiftDay])
   @@index([userId, occurredAt])
   @@index([siteId, shiftDay])
+}
+
+// ---------------------------------------------------------------------------
+// TASKS
+// ---------------------------------------------------------------------------
+
+enum TaskPriority {
+  NORMAL
+  URGENT
+}
+
+/// A job somebody needs to do.
+///
+/// COMPLETION IS STORED, NOT DERIVED — the one place in this system where a
+/// state sits on the row rather than being summed from a ledger, and worth
+/// saying why. Population and stock ACCUMULATE, so a stored total is a second
+/// source of truth waiting to disagree with the events beneath it. A task is
+/// finished once; `completedAt` is the event, not a running total of them.
+/// Everything that CAN be worked out still is: `overdue` is computed on read and
+/// appears nowhere in this table.
+///
+/// TASKS ARE CANCELLED, NEVER DELETED. "We were going to move the pullets and
+/// then didn't" is a fact about the week, and a row that vanishes takes the
+/// reason with it.
+///
+/// NO RECURRENCE FIELD. The recurring-inspection case is answered by
+/// BiosecurityChecklist; a second repeat engine beside it produces a task list
+/// nobody reads. NO PHOTO EVIDENCE either — that means file storage, and the
+/// provider is not a decision to make quietly.
+model Task {
+  id             String       @id @default(cuid())
+  organisationId String
+  siteId         String
+  title          String
+  detail         String?
+  priority       TaskPriority @default(NORMAL)
+
+  /// NULL MEANS ANYONE WHO IS FREE, which on a farm of three is the common case
+  /// and a real answer rather than a missing one. Forcing an assignee produces a
+  /// list where everything is nominally one person's.
+  assigneeId String?
+
+  /// Null means "when you can". A task with no date is never overdue — see
+  /// isOverdue() in src/lib/tasks.ts.
+  dueOn DateTime? @db.Date
+
+  completedAt    DateTime?
+  completedById  String?
+  completionNote String?
+
+  cancelledAt  DateTime?
+  cancelReason String?
+
+  createdById String
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  site         Site         @relation(fields: [siteId], references: [id])
+  assignee     User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  completedBy  User?        @relation("TaskCompletedBy", fields: [completedById], references: [id])
+  createdBy    User         @relation("TaskCreatedBy", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organisationId, completedAt])
+  @@index([siteId, dueOn])
+  @@index([assigneeId, completedAt])
 }
