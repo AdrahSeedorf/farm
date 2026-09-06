@@ -64,14 +64,19 @@ export function Field({
 
 export function TextInput({
   error,
+  className,
   ...props
 }: InputHTMLAttributes<HTMLInputElement> & { error?: string }) {
+  // `className` is APPENDED, not replaced. It used to be swallowed by the line
+  // below, which meant a caller styling a PIN field with wide letter-spacing got
+  // no letter-spacing and no warning — a prop that silently does nothing is
+  // worse than one that is not accepted.
   return (
     <input
       {...props}
       aria-invalid={error ? true : undefined}
       aria-describedby={error ? `${props.id}-error` : undefined}
-      className={controlClass}
+      className={className ? `${controlClass} ${className}` : controlClass}
     />
   );
 }
