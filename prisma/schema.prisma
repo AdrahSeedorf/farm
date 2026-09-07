@@ -73,6 +73,7 @@ model Organisation {
   purchaseOrders  PurchaseOrder[]
   attendance      AttendanceEvent[]
   tasks           Task[]
+  incidents       Incident[]
 }
 
 model Site {
@@ -112,6 +113,7 @@ model Site {
   purchaseOrders    PurchaseOrder[]
   attendance        AttendanceEvent[]
   tasks             Task[]
+  incidents         Incident[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1275,6 +1277,9 @@ model User {
   tasksAssigned      Task[]             @relation("TaskAssignee")
   tasksCompleted     Task[]             @relation("TaskCompletedBy")
   tasksCreated       Task[]             @relation("TaskCreatedBy")
+  incidentsReported  Incident[]         @relation("IncidentReporter")
+  incidentsReviewed  Incident[]         @relation("IncidentReviewer")
+  incidentsClosed    Incident[]         @relation("IncidentCloser")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1958,4 +1963,80 @@ model Task {
   @@index([organisationId, completedAt])
   @@index([siteId, dueOn])
   @@index([assigneeId, completedAt])
+}
+
+// ---------------------------------------------------------------------------
+// INCIDENTS
+// ---------------------------------------------------------------------------
+
+enum IncidentKind {
+  PREDATOR
+  THEFT
+  EQUIPMENT
+  POWER
+  WEATHER
+  ESCAPE
+  PERSON_HURT
+  OTHER
+}
+
+enum IncidentSeverity {
+  MINOR
+  NOTABLE
+  SERIOUS
+}
+
+/// Something went wrong.
+///
+/// THE ONLY NUMBER THIS TABLE HAS is the proportion of incidents that actually
+/// get reported, and that is set by how much the form asks for at half five in
+/// the morning. Hence: ONE REQUIRED FIELD (`what`). Everything else is optional
+/// or filled in later by somebody else.
+///
+/// SEVERITY IS NULLABLE AND SET AT REVIEW, never by the reporter. Asking the
+/// person at the fence to grade it produces either everything marked minor,
+/// because nobody wants to sound dramatic, or everything marked serious, because
+/// nobody wants to be blamed for downplaying it.
+///
+/// NEVER DELETED. An incident somebody later decided was nothing is still a
+/// thing that was noticed and looked at, and that record is what lets a farm
+/// tell a pattern from a one-off.
+model Incident {
+  id             String        @id @default(cuid())
+  organisationId String
+  siteId         String
+  /// Human reference. INC-2026-0007. Derived, never typed.
+  reference      String
+  /// The one required field.
+  what           String
+  kind           IncidentKind?
+
+  /// When it happened, which is not when it was written down — somebody finding
+  /// a hole in the fence at six reports something that happened in the night.
+  occurredAt DateTime
+
+  reportedById String
+  reportedAt   DateTime @default(now())
+
+  reviewedAt     DateTime?
+  reviewedById   String?
+  severity       IncidentSeverity?
+  reviewNote     String?
+
+  closedAt   DateTime?
+  closedById String?
+  outcome    String?
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  site         Site         @relation(fields: [siteId], references: [id])
+  reportedBy   User         @relation("IncidentReporter", fields: [reportedById], references: [id])
+  reviewedBy   User?        @relation("IncidentReviewer", fields: [reviewedById], references: [id])
+  closedBy     User?        @relation("IncidentCloser", fields: [closedById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, reference])
+  @@index([organisationId, reviewedAt])
+  @@index([siteId, occurredAt])
 }
