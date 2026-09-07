@@ -205,7 +205,11 @@ async function main() {
         note:
           'Breed standards not yet configured. Load the body-weight and lay-curve ' +
           'tables for the breed purchased before the first weight sample is taken.',
-        mortalityAlertPctDaily: 0.5,
+        // The daily mortality threshold used to live here as a single figure
+        // for the whole life of the flock. It has moved onto the lifecycle
+        // stages below, because one number cannot be right for both a
+        // four-day-old chick and a hen in her fortieth week of lay. See
+        // src/lib/alerts.ts.
         uniformityTargetCvPct: 10,
         pointOfLayAgeDays: 126,
       },
@@ -218,17 +222,40 @@ async function main() {
   // being an asset that earns. It is a flag on the stage, not a key matched in
   // code, so a future species can point it at "lactating" or "harvest" without
   // anything in the costing layer knowing what a laying hen is.
+  //
+  // THE MORTALITY FIGURES BELOW ARE STARTING POINTS, NOT VETERINARY ADVICE.
+  //
+  // They are a daily count of deaths as a percentage of the birds alive that
+  // morning, and they exist so the alert engine has a line to compare against on
+  // day one instead of staying silent. They were derived from published
+  // commercial layer expectations — roughly 1% loss across the whole of week
+  // one, and roughly 5–7% across the entire laying period — and set at about
+  // two to three times the ordinary daily rate for the stage, which is the point
+  // at which a rate stops being variation:
+  //
+  //   brooding   ordinary ≈ 0.14%/day (1% over 7 days)   → attention 0.35, critical 0.70
+  //   growing    ordinary ≈ 0.02%/day (2.5% over 15 wks) → attention 0.12, critical 0.30
+  //   pre-lay    as growing, and a stressful transfer     → attention 0.12, critical 0.30
+  //   laying     ordinary ≈ 0.012%/day (6% over 72 wks)  → attention 0.10, critical 0.25
+  //   depleting  an old flock loses more, and it is expected → attention 0.15, critical 0.35
+  //
+  // ADRAH's vet should revise every one of these, and the settings screen says
+  // so. Nothing in the software will change them, and no alert built from them
+  // suggests a cause or a treatment — it reports that a number crossed a line
+  // and names whose line it was.
   const stages = [
-    { key: 'brooding', name: 'Brooding', sequence: 1, start: 0, end: 28, productionStart: false },
-    { key: 'growing', name: 'Growing', sequence: 2, start: 29, end: 112, productionStart: false },
-    { key: 'pre_lay', name: 'Pre-lay', sequence: 3, start: 113, end: 133, productionStart: false },
-    { key: 'laying', name: 'Laying', sequence: 4, start: 134, end: 525, productionStart: true },
-    { key: 'depleting', name: 'Depleting', sequence: 5, start: 526, end: null, productionStart: false },
+    { key: 'brooding', name: 'Brooding', sequence: 1, start: 0, end: 28, productionStart: false, attention: 0.35, critical: 0.7 },
+    { key: 'growing', name: 'Growing', sequence: 2, start: 29, end: 112, productionStart: false, attention: 0.12, critical: 0.3 },
+    { key: 'pre_lay', name: 'Pre-lay', sequence: 3, start: 113, end: 133, productionStart: false, attention: 0.12, critical: 0.3 },
+    { key: 'laying', name: 'Laying', sequence: 4, start: 134, end: 525, productionStart: true, attention: 0.1, critical: 0.25 },
+    { key: 'depleting', name: 'Depleting', sequence: 5, start: 526, end: null, productionStart: false, attention: 0.15, critical: 0.35 },
   ];
 
   for (const s of stages) {
     await db.lifecycleStage.upsert({
       where: { productionTypeProfileId_key: { productionTypeProfileId: layer.id, key: s.key } },
+      // The thresholds are NOT in the update branch. Re-running the seed must
+      // not quietly overwrite a figure the farm's vet has since changed.
       update: { name: s.name, sequence: s.sequence, isProductionStart: s.productionStart },
       create: {
         productionTypeProfileId: layer.id,
@@ -238,6 +265,8 @@ async function main() {
         typicalStartAgeDays: s.start,
         typicalEndAgeDays: s.end,
         isProductionStart: s.productionStart,
+        mortalityAttentionPct: s.attention,
+        mortalityCriticalPct: s.critical,
       },
     });
   }

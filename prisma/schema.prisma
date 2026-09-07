@@ -57,6 +57,29 @@ model Organisation {
   pulletMarketPriceOn      DateTime? @db.Date
   pulletMarketPriceSource  String?
 
+  /// ALERT THRESHOLDS — settings, not code. See src/lib/alerts.ts.
+  ///
+  /// The hour by which a house with no daily record is worth mentioning, in the
+  /// farm's own timezone. Ten, because collection and the morning walk are long
+  /// done by then; a cut-off at first light would mark every house missing every
+  /// morning and teach everybody to ignore the alert list.
+  recordDueHour Int @default(10)
+
+  /// Fallback daily mortality thresholds, as a percentage of the opening
+  /// population, used only where the lifecycle stage carries none of its own.
+  /// The per-stage figures are the ones that matter — a brooding chick and a hen
+  /// in lay are not comparable — and these exist so a production type nobody has
+  /// filled in yet still gets a rule rather than silence.
+  mortalityAttentionPct Float @default(0.10)
+  mortalityCriticalPct  Float @default(0.25)
+
+  /// How many times the recent daily average counts as a spike, and the fewest
+  /// deaths that may be called one. The floor is what makes the rule usable: a
+  /// healthy flock of 2,000 loses about one bird every four days, so three times
+  /// the average is a single bird on an ordinary day.
+  mortalitySpikeMultiple    Float @default(3)
+  mortalitySpikeFloorDeaths Int   @default(3)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -238,6 +261,26 @@ model LifecycleStage {
   /// switched over — and then the cost-per-point-of-lay figure simply does not
   /// apply and is not shown.
   isProductionStart       Boolean @default(false)
+
+  /// HOW MUCH DEATH IS ORDINARY AT THIS STAGE, as a percentage of the opening
+  /// population in a single day.
+  ///
+  /// ON THE STAGE, NOT IN THE CODE, for two reasons. Week-one mortality of about
+  /// 1% is ordinary in brooding and an outbreak in lay, so one flat figure
+  /// either screams through every brooding period or stays silent through a real
+  /// one. And reading `key === 'brooding'` in the alert engine would put a
+  /// poultry word in the core, which is wrong the day this platform carries a
+  /// second species.
+  ///
+  /// SEEDED FIGURES ARE STARTING POINTS FOR A VET TO REVISE, taken from
+  /// published breed material and labelled as such on the settings screen.
+  /// Nothing in this software changes them, and nothing treats them as clinical
+  /// advice — the alert says a number crossed a line somebody set, and says
+  /// whose line it was.
+  ///
+  /// Null falls back to the organisation figure.
+  mortalityAttentionPct   Float?
+  mortalityCriticalPct    Float?
 
   productionType ProductionTypeProfile @relation(fields: [productionTypeProfileId], references: [id], onDelete: Cascade)
   animalGroups   AnimalGroup[]

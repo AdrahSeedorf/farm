@@ -68,6 +68,17 @@ function some(resource: Resource, actions: Action[]): Permission[] {
 }
 
 /**
+ * Every permission the system defines.
+ *
+ * The type `${Resource}:${Action}` says which strings are well-formed; this says
+ * which ones exist. Anything that has to check a permission string it was handed
+ * — the alert rule catalogue, a settings screen listing what a role can do —
+ * needs the second, because a well-formed permission nobody grants is exactly
+ * how a rule ends up invisible to everybody and nobody notices.
+ */
+export const PERMISSIONS: readonly Permission[] = RESOURCES.flatMap((r) => all(r));
+
+/**
  * The role matrix.
  *
  * Two rules from the specification are enforced here and asserted in the tests:
