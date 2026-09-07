@@ -119,6 +119,8 @@ export const ALERT_RULES = [
 export type AlertRule = (typeof ALERT_RULES)[number];
 
 export interface RuleDefinition {
+  /** What to call this rule on screen. A heading, not a sentence. */
+  label: string;
   /** The level this rule fires at, unless the builder raises it. */
   level: AlertLevel;
   /**
@@ -140,84 +142,98 @@ export interface RuleDefinition {
 
 export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
   'stock.out': {
+    label: 'Out of stock',
     level: 'CRITICAL',
     permission: 'inventory:view',
     what: 'An item in regular use has nothing left.',
     why: 'Birds do not wait for a delivery. This is the one stock condition that costs money the same day.',
   },
   'stock.short': {
+    label: 'Needs ordering',
     level: 'ATTENTION',
     permission: 'inventory:view',
     what: 'Stock will run out before a delivery ordered today could arrive.',
     why: 'Measured against the supplier’s own lead time, so it fires when ordering has to start — not at a number of days that means nothing on its own.',
   },
   'stock.expired': {
+    label: 'Expired stock still counted',
     level: 'ATTENTION',
     permission: 'inventory:view',
     what: 'A batch is past its expiry date and still counted as stock.',
     why: 'It inflates every days-of-cover figure on the farm, and somebody will eventually use it.',
   },
   'health.overdue': {
+    label: 'Health programme overdue',
     level: 'CRITICAL',
     permission: 'health:view',
     what: 'A scheduled vaccination or treatment has passed its date.',
     why: 'The programme is the farm’s own; missing a date on it is the farm departing from a plan it made.',
   },
   'health.due': {
+    label: 'Health programme due',
     level: 'ATTENTION',
     permission: 'health:view',
     what: 'A scheduled vaccination or treatment falls due shortly.',
     why: 'Vaccines have to be in the store before the day, and the store is two weeks from the supplier.',
   },
   'health.withdrawal': {
+    label: 'Withdrawal period in force',
     level: 'CRITICAL',
     permission: 'health:view',
     what: 'A withdrawal period is in force — produce from this flock must not be sold.',
     why: 'Selling inside a withdrawal period is a food-safety breach, not an inefficiency.',
   },
   'health.unreviewed': {
+    label: 'Programme not vet-reviewed',
     level: 'NOTICE',
     permission: 'health:view',
     what: 'A flock is following a health programme no vet has signed off.',
     why: 'The software will schedule the doses either way. Whether a vet has looked at the schedule is a fact the farm should be able to see, not one it discovers during an inspection.',
   },
   'mortality.high': {
+    label: 'Deaths above the threshold',
     level: 'CRITICAL',
     permission: 'flock:view',
     what: 'Deaths in a day exceeded the figure set for that stage of life.',
     why: 'The earliest signal of disease a farm gets without a laboratory.',
   },
   'mortality.spike': {
+    label: 'Deaths above the recent average',
     level: 'ATTENTION',
     permission: 'flock:view',
     what: 'Deaths today are several times the recent daily average.',
     why: 'Catches a flock whose absolute rate is still inside the threshold but whose shape has changed.',
   },
   'record.missing': {
+    label: 'No record entered today',
     level: 'ATTENTION',
     permission: 'dailyRecord:view',
     what: 'A house has no record for today by the cut-off time.',
     why: 'A missing day is not a gap in a report — it is a day nobody counted the birds, and it cannot be recovered afterwards.',
   },
   'order.late': {
+    label: 'Order is late',
     level: 'ATTENTION',
     permission: 'procurement:view',
     what: 'A purchase order is past the date it was expected and still not fully received.',
     why: 'A late order is only discovered by asking. Nobody asks on a busy morning.',
   },
   'task.overdue': {
+    label: 'Task overdue',
     level: 'ATTENTION',
     permission: 'task:view',
     what: 'A task is past its due date and not finished.',
     why: 'Tasks with dates on them were given dates for a reason.',
   },
   'incident.unattended': {
+    label: 'Report nobody has read',
     level: 'CRITICAL',
     permission: 'incident:view',
     what: 'Somebody reported something and nobody has recorded looking at it.',
     why: 'The reporting rate is the only number this module has, and it collapses the first time a report is ignored.',
   },
   'attendance.openShift': {
+    label: 'Still clocked in',
     level: 'ATTENTION',
     permission: 'attendance:view',
     what: 'Somebody is still clocked in long after any plausible shift.',

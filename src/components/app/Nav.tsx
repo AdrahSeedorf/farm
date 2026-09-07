@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { currentUserCan, requirePrincipal } from '@/lib/session';
 import { terminologyFrom } from '@/lib/terminology';
 import type { Permission } from '@/lib/rbac';
+import { ALERT_RULES, RULE_CATALOGUE } from '@/lib/alerts';
 
 /**
  * Primary navigation.
@@ -11,8 +12,21 @@ import type { Permission } from '@/lib/rbac';
  * control. Every destination re-checks for itself. Someone who types the URL
  * gets the same answer as someone who never saw the link.
  */
-const ITEMS: { href: string; label: string; permission: Permission }[] = [
+/**
+ * `permission` may be a list, meaning ANY of them is enough.
+ *
+ * Only Alerts uses it, and it needs it: every alert rule carries its own
+ * permission, so the page shows each reader the subset they hold rather than
+ * being one owner-only screen. A single permission on the link would have hidden
+ * it from the worker whose overdue task and unread incident report are on it.
+ */
+const ITEMS: { href: string; label: string; permission: Permission | Permission[] }[] = [
   { href: '/daily', label: 'Today', permission: 'dailyRecord:view' },
+  {
+    href: '/alerts',
+    label: 'Alerts',
+    permission: ALERT_RULES.map((r) => RULE_CATALOGUE[r].permission),
+  },
   { href: '/dashboard', label: 'Dashboard', permission: 'report:view' },
   { href: '/flocks', label: 'Flocks', permission: 'flock:view' },
   // Labelled from the species profile below, not from this string. See productionLabel().
@@ -56,7 +70,11 @@ export async function Nav() {
   const principal = await requirePrincipal();
 
   const visible = await Promise.all(
-    ITEMS.map(async (item) => ((await currentUserCan(item.permission)) ? item : null)),
+    ITEMS.map(async (item) => {
+      const wanted = Array.isArray(item.permission) ? item.permission : [item.permission];
+      const answers = await Promise.all(wanted.map((p) => currentUserCan(p)));
+      return answers.some(Boolean) ? item : null;
+    }),
   );
   const produce = await productionLabel(principal.organisationId);
   const items = visible
