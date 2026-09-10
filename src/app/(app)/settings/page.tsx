@@ -57,6 +57,8 @@ export default async function SettingsPage() {
                 name: org.name,
                 legalName: org.legalName,
                 stockLeadTimeDays: org.stockLeadTimeDays,
+                aboutStory: org.aboutStory ?? '',
+                foundedYear: org.foundedYear === null ? '' : String(org.foundedYear),
                 pulletMarketPrice:
                   org.pulletMarketPricePesewas === null
                     ? ''

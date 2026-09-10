@@ -19,7 +19,8 @@
     "rebuild:derived": "tsx scripts/rebuild-derived.ts",
     "standards:load": "tsx scripts/load-standards.ts",
     "user:password": "tsx scripts/set-password.ts",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "perf:budget": "tsx scripts/check-performance-budget.mts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.1.0",
@@ -49,7 +50,7 @@
     "typescript": "^5",
     "vitest": "^4.1.10"
   },
-  "description": "ADRAH Farms — farm management platform",
+  "description": "ADRAH Farms \u2014 farm management platform",
   "engines": {
     "node": ">=20.12"
   }

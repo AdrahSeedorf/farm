@@ -65,6 +65,35 @@ export type ProductionUnitInput = z.infer<typeof productionUnitSchema>;
 export const organisationSchema = z.object({
   name: z.string().trim().min(2, 'Enter a name.').max(80),
   legalName: optionalText(120),
+
+  /**
+   * The About page, in the owner's own words.
+   *
+   * GENEROUSLY LONG AND ENTIRELY OPTIONAL. A limit that cuts somebody off
+   * mid-story teaches them the box is not for real writing; a blank one is a
+   * page that says less, which is the safe direction. No markup is parsed —
+   * what they type is what appears, paragraph breaks included.
+   */
+  aboutStory: optionalText(4000),
+
+  /**
+   * The year the business started.
+   *
+   * REFUSED IF IT IS IN THE FUTURE OR IMPLAUSIBLY OLD, and otherwise taken as
+   * given. This is the kind of field where a typo becomes a claim on a public
+   * page, and 2062 or 1902 are the two typos that actually happen.
+   */
+  foundedYear: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v === undefined || v === '' ? null : Number(v)))
+    .refine(
+      (v) =>
+        v === null ||
+        (Number.isInteger(v) && v >= 1950 && v <= new Date().getUTCFullYear()),
+      'Enter the year the business started — it cannot be in the future.',
+    ),
   /**
    * Days between placing a stock order and receiving it.
    *

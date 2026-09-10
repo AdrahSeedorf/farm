@@ -20,6 +20,7 @@ import { locationLine, publicContact } from '@/lib/public-site';
  */
 
 const NAV = [
+  { href: '/about', label: 'About' },
   { href: '/products', label: 'Products' },
   { href: '/wholesale', label: 'Wholesale' },
   { href: '/quality', label: 'Quality' },

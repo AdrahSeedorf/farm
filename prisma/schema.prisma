@@ -57,6 +57,24 @@ model Organisation {
   pulletMarketPriceOn      DateTime? @db.Date
   pulletMarketPriceSource  String?
 
+  /// WHAT THE PUBLIC SITE SAYS ABOUT THE FARM, in the owner's own words.
+  ///
+  /// NULLABLE, AND THE PAGE SAYS LESS RATHER THAN INVENTING. An About page is
+  /// where a marketing site is most tempted to make things up — a founder story,
+  /// a number of years, a family history — and every one of those is a claim a
+  /// buyer may repeat back. Nothing here is seeded and nothing is generated: the
+  /// page renders what has been written and omits what has not.
+  ///
+  /// IN THE DATABASE RATHER THAN A FILE because the person who knows the story
+  /// is not the person who can deploy. A content file would mean the About page
+  /// could only ever be changed by asking a developer, which in practice means
+  /// it is written once and never corrected.
+  aboutStory      String?
+  /// The year the business started. Null until somebody states one — a farm with
+  /// no year on its About page reads as new, which is true; a wrong year reads as
+  /// a lie the day somebody checks.
+  foundedYear     Int?
+
   /// ALERT THRESHOLDS — settings, not code. See src/lib/alerts.ts.
   ///
   /// The hour by which a house with no daily record is worth mentioning, in the

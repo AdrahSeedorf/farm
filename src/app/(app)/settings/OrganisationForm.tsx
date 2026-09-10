@@ -23,6 +23,8 @@ export function OrganisationForm({
     name: string;
     legalName: string | null;
     stockLeadTimeDays: number;
+    aboutStory: string;
+    foundedYear: string;
     pulletMarketPrice: string;
     pulletMarketPriceOn: string;
     pulletMarketPriceSource: string;
@@ -43,6 +45,41 @@ export function OrganisationForm({
           required
         />
       </Field>
+      {/* THE PUBLIC ABOUT PAGE, EDITED HERE rather than in a content file,
+          because the person who knows the story is not the person who can
+          deploy. Left blank, the page says less — it never invents. */}
+      <Field
+        label="About the farm"
+        htmlFor="org-about"
+        error={e.aboutStory}
+        hint="Appears on the public About page, exactly as you type it. Leave it blank and the page shows only what the records already prove — where the farm is, how many houses, what you rear."
+      >
+        <textarea
+          id="org-about"
+          name="aboutStory"
+          rows={6}
+          defaultValue={defaults.aboutStory}
+          placeholder="Who you are, why you started, and what you want buyers to know."
+          className="w-full rounded-control border border-border-strong bg-surface-card px-3 py-2.5 text-[16px] text-text-primary outline-none transition-colors focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/25"
+        />
+      </Field>
+
+      <Field
+        label="Year the business started"
+        htmlFor="org-founded"
+        error={e.foundedYear}
+        hint="Leave blank if you would rather not say. A farm with no year reads as new, which is true — a wrong year reads as a lie the day somebody checks."
+      >
+        <TextInput
+          id="org-founded"
+          name="foundedYear"
+          inputMode="numeric"
+          defaultValue={defaults.foundedYear}
+          placeholder="2026"
+          error={e.foundedYear}
+        />
+      </Field>
+
       <Field
         label="Registered legal name"
         htmlFor="org-legal"
