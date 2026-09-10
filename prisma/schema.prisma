@@ -118,6 +118,8 @@ model Organisation {
   alertAcknowledgements AlertAcknowledgement[]
   enquiries       Enquiry[]
   customers       Customer[]
+  products        Product[]
+  productPrices   ProductPrice[]
 }
 
 model Site {
@@ -757,6 +759,7 @@ model ProductionGrade {
 
   @@unique([productionTypeProfileId, key])
   @@index([productionTypeProfileId, sortOrder])
+  products Product[]
 }
 
 /// What happens to what was collected.
@@ -1378,6 +1381,7 @@ model User {
   ordersCancelled    PurchaseOrder[]    @relation("PurchaseOrderCancelledBy")
   attendance         AttendanceEvent[]  @relation("AttendanceSubject")
   attendanceRecorded AttendanceEvent[]  @relation("AttendanceRecorder")
+  pricesSet          ProductPrice[]         @relation("PriceSetBy")
   customersCreated   Customer[]             @relation("CustomerCreatedBy")
   customersArchived  Customer[]             @relation("CustomerArchivedBy")
   enquiriesRead      Enquiry[]              @relation("EnquiryReadBy")
@@ -1572,6 +1576,7 @@ model Customer {
   archivedById   String?
   archiveReason  String?
 
+  prices       ProductPrice[]
   organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   createdBy    User?        @relation("CustomerCreatedBy", fields: [createdById], references: [id])
   archivedBy   User?        @relation("CustomerArchivedBy", fields: [archivedById], references: [id])
@@ -1580,6 +1585,81 @@ model Customer {
   /// The lookup the duplicate check makes on every save.
   @@index([organisationId, phone])
   @@index([organisationId, archivedAt])
+}
+
+/// WHAT THE FARM SELLS — a pack, at a price, drawn from a grade.
+///
+/// SEPARATE FROM `Item`, which is what the farm BUYS and holds in the store, and
+/// separate from `ProductionGrade`, which is how produce is sorted. A crate of
+/// large eggs is a product; "large" is a grade; layer mash is an item. Collapsing
+/// any two of those would mean feed appearing on a price list or a grade being
+/// given a selling price it cannot have on its own.
+model Product {
+  id             String  @id @default(cuid())
+  organisationId String
+
+  sku            String
+  name           String
+
+  /// The grade this is drawn from, where it is drawn from one. Null for
+  /// anything that is not graded produce — a spent hen, for instance.
+  gradeId        String?
+
+  /// How many base units are in one pack. A crate of thirty is 30.
+  unitsPerPack   Int     @default(1)
+  /// What one is called when counted: "crate", "tray", "bird".
+  packLabel      String  @default("unit")
+
+  isActive       Boolean @default(true)
+  notes          String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organisation Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  grade        ProductionGrade? @relation(fields: [gradeId], references: [id])
+  prices       ProductPrice[]
+
+  @@unique([organisationId, sku])
+  @@index([organisationId, isActive])
+}
+
+/// A PRICE, AS A DATED ROW. Append-only; nothing here is ever updated.
+///
+/// Changing a price adds a row. That is what lets a May invoice still add up
+/// after a June price rise, and it is the same discipline the population and
+/// stock ledgers use — applied to money, where getting it wrong is a
+/// bookkeeping problem nobody can fix afterwards.
+///
+/// `customerId` null is the list price. A row for a buyer beats the list on the
+/// same date. A buyer row with a NULL price means the agreement ended and they
+/// go back to the list — see priceFor() in src/lib/pricing.ts.
+model ProductPrice {
+  id             String  @id @default(cuid())
+  organisationId String
+  productId      String
+  customerId     String?
+
+  /// Per pack, in PESEWAS. Never cedis, never a float. Null ends an agreement.
+  pricePesewas   Int?
+
+  /// The day this price starts applying. Backdating is allowed — a price agreed
+  /// on the phone last Tuesday and typed in today is Tuesday's price, and
+  /// recording it as today's would make that week's orders fail to reconcile.
+  effectiveFrom  DateTime @db.Date
+
+  note           String?
+  setById        String?
+  createdAt      DateTime @default(now())
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customer     Customer?    @relation(fields: [customerId], references: [id])
+  setBy        User?        @relation("PriceSetBy", fields: [setById], references: [id])
+
+  /// The lookup every quote makes.
+  @@index([organisationId, productId, effectiveFrom])
+  @@index([customerId, effectiveFrom])
 }
 
 model LoginAttempt {

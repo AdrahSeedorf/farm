@@ -62,6 +62,11 @@ export type AuditAction =
   | 'customer.update'
   | 'customer.archive'
   | 'customer.restore'
+  | 'product.create'
+  | 'product.update'
+  | 'product.setActive'
+  // A price is never updated, only added — so there is no `price.update`.
+  | 'price.set'
   | 'item.create'
   | 'item.update'
   | 'item.archive'

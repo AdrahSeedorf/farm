@@ -37,7 +37,19 @@ export function CustomerForm({
     saveCustomer.bind(null, customerId),
     {} as CustomerFormState,
   );
+  /**
+   * CONTROLLED, because React 19 resets an uncontrolled input to its
+   * `defaultValue` when a form action returns — so a rejected phone number
+   * emptied the name, the business and the notes along with it. The same fault
+   * was found on the product form; the rule is now written on both.
+   */
   const [kind, setKind] = useState<string>(defaults.kind);
+  const [name, setName] = useState(defaults.name);
+  const [phone, setPhone] = useState(defaults.phone);
+  const [businessName, setBusinessName] = useState(defaults.businessName);
+  const [email, setEmail] = useState(defaults.email);
+  const [town, setTown] = useState(defaults.town);
+  const [notes, setNotes] = useState(defaults.notes);
   const e = state.fieldErrors ?? {};
 
   return (
@@ -71,7 +83,8 @@ export function CustomerForm({
           <TextInput
             id="name"
             name="name"
-            defaultValue={defaults.name}
+            value={name}
+            onChange={(ev) => setName(ev.target.value)}
             autoComplete="off"
             error={e.name}
           />
@@ -88,7 +101,8 @@ export function CustomerForm({
             id="phone"
             name="phone"
             type="tel"
-            defaultValue={defaults.phone}
+            value={phone}
+            onChange={(ev) => setPhone(ev.target.value)}
             placeholder="024 123 4567"
             error={e.phone}
           />
@@ -116,13 +130,20 @@ export function CustomerForm({
           <TextInput
             id="businessName"
             name="businessName"
-            defaultValue={defaults.businessName}
+            value={businessName}
+            onChange={(ev) => setBusinessName(ev.target.value)}
             error={e.businessName}
           />
         </Field>
 
         <Field label="Town" htmlFor="town" error={e.town} hint="Where you would tell a driver.">
-          <TextInput id="town" name="town" defaultValue={defaults.town} error={e.town} />
+          <TextInput
+            id="town"
+            name="town"
+            value={town}
+            onChange={(ev) => setTown(ev.target.value)}
+            error={e.town}
+          />
         </Field>
       </div>
 
@@ -131,7 +152,8 @@ export function CustomerForm({
           id="email"
           name="email"
           type="email"
-          defaultValue={defaults.email}
+          value={email}
+          onChange={(ev) => setEmail(ev.target.value)}
           error={e.email}
         />
       </Field>
@@ -146,7 +168,8 @@ export function CustomerForm({
           id="notes"
           name="notes"
           rows={4}
-          defaultValue={defaults.notes}
+          value={notes}
+          onChange={(ev) => setNotes(ev.target.value)}
           className="w-full rounded-control border border-border-strong bg-surface-card px-3 py-2.5 text-[16px] text-text-primary outline-none transition-colors focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/25"
         />
       </Field>
