@@ -98,6 +98,7 @@ model Organisation {
   tasks           Task[]
   incidents       Incident[]
   alertAcknowledgements AlertAcknowledgement[]
+  enquiries       Enquiry[]
 }
 
 model Site {
@@ -1358,6 +1359,9 @@ model User {
   ordersCancelled    PurchaseOrder[]    @relation("PurchaseOrderCancelledBy")
   attendance         AttendanceEvent[]  @relation("AttendanceSubject")
   attendanceRecorded AttendanceEvent[]  @relation("AttendanceRecorder")
+  enquiriesRead      Enquiry[]              @relation("EnquiryReadBy")
+  enquiriesResponded Enquiry[]              @relation("EnquiryRespondedBy")
+  enquiriesArchived  Enquiry[]              @relation("EnquiryArchivedBy")
   alertsParked       AlertAcknowledgement[] @relation("AlertAcknowledgedBy")
   alertsUnparked     AlertAcknowledgement[] @relation("AlertLiftedBy")
   tasksAssigned      Task[]             @relation("TaskAssignee")
@@ -1438,6 +1442,70 @@ model UserSiteScope {
 /// than in process memory deliberately — an in-memory counter resets on every
 /// deploy and is per-instance, which on serverless means effectively no limit
 /// at all.
+// ---------------------------------------------------------------------------
+// THE PUBLIC WEBSITE
+// ---------------------------------------------------------------------------
+
+enum EnquiryKind {
+  WHOLESALE
+  GENERAL
+}
+
+/// SOMEBODY WHO CAME LOOKING, written by a stranger.
+///
+/// The only table in this schema an unauthenticated request can write to, which
+/// is why it holds nothing that could hurt if it were filled with rubbish: no
+/// prices, no links to a flock, no effect on any ledger. It is a message.
+///
+/// NEVER DELETED, and never edited after the fact. A farm that is going to be
+/// asked in a year "who did you turn away in November" needs the answer to still
+/// exist. Dealing with one sets `respondedAt`; putting it aside sets
+/// `archivedAt`.
+///
+/// EVERY FIELD BUT THE NAME AND A WAY TO REPLY IS OPTIONAL. This form is the
+/// farm's only channel before the first egg, and the number of enquiries it
+/// collects falls with every box a buyer has to fill in on a phone.
+model Enquiry {
+  id             String      @id @default(cuid())
+  organisationId String
+  kind           EnquiryKind
+
+  name           String
+  /// E.164 where it could be normalised, as typed where it could not — a number
+  /// this system cannot parse is still a number a person can ring.
+  phone          String
+  email          String?
+  businessName   String?
+
+  /// What they expect to take, in crates a week. Free-form in the form, kept as
+  /// a number where it parsed, because "about 20" is a real answer.
+  cratesPerWeek  Int?
+  /// When they want to start. A month, as they wrote it.
+  fromWhen       String?
+  message        String?
+
+  /// For rate limiting and for spotting a flood. Never shown on any screen.
+  ipAddress      String?
+
+  createdAt      DateTime  @default(now())
+
+  readAt         DateTime?
+  readById       String?
+  respondedAt    DateTime?
+  respondedById  String?
+  responseNote   String?
+  archivedAt     DateTime?
+  archivedById   String?
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  readBy       User?        @relation("EnquiryReadBy", fields: [readById], references: [id])
+  respondedBy  User?        @relation("EnquiryRespondedBy", fields: [respondedById], references: [id])
+  archivedBy   User?        @relation("EnquiryArchivedBy", fields: [archivedById], references: [id])
+
+  @@index([organisationId, createdAt])
+  @@index([ipAddress, createdAt])
+}
+
 model LoginAttempt {
   id         String   @id @default(cuid())
   /// Lowercased email, phone, or IP address — whatever is being limited.

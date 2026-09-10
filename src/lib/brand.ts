@@ -24,10 +24,14 @@ export const BRAND = {
   },
 
   location: {
-    /** Spec assumptions A2 — to be confirmed. */
-    town: '',
+    /**
+     * Confirmed in conversation: New Edubiase, Ashanti Region. The district is
+     * still blank because nobody has stated it, and `locationLine()` simply
+     * leaves out what is empty rather than printing a gap.
+     */
+    town: 'New Edubiase',
     district: '',
-    region: '',
+    region: 'Ashanti Region',
     country: 'Ghana',
   },
 
