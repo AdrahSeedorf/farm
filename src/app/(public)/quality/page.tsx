@@ -40,11 +40,21 @@ export default function QualityPage() {
           <h2 className="text-[19px] font-bold text-text-primary">
             Withdrawal periods are enforced, not remembered
           </h2>
+          {/* PRECISE, BECAUSE THE SOFTWARE IS. Eggs are pooled in the store, so
+              most of the time nothing can tell which house a crate came from —
+              and a claim to block "by house" while having no idea which house
+              would be a claim the farm could not stand behind. What actually
+              happens is described instead, and it is stronger than a vague
+              version: no order goes out unaccounted for while anything is
+              restricted. See withdrawalGate() in src/lib/sales.ts. */}
           <p className="mt-2 text-[15.5px] leading-relaxed text-text-secondary">
             When a house is treated with anything that carries a withdrawal period, our system
-            blocks produce from that house from being sold until the period has run. It is not
-            a note on a wall or a date somebody has to remember on a busy morning — the sale
-            is refused.
+            will not let an order be confirmed until somebody says which house the produce came
+            from — and if it came from the treated house, it refuses the sale outright and says
+            what date it clears. Eggs are pooled in the store, so the software will not guess:
+            either the farm can account for where a crate came from, or the sale does not
+            happen. It is not a note on a wall or a date somebody has to remember on a busy
+            morning.
           </p>
         </section>
 

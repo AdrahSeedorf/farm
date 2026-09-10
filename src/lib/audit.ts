@@ -67,6 +67,12 @@ export type AuditAction =
   | 'product.setActive'
   // A price is never updated, only added — so there is no `price.update`.
   | 'price.set'
+  | 'salesOrder.create'
+  | 'salesOrder.line.add'
+  | 'salesOrder.line.remove'
+  | 'salesOrder.source'
+  | 'salesOrder.confirm'
+  | 'salesOrder.cancel'
   | 'item.create'
   | 'item.update'
   | 'item.archive'

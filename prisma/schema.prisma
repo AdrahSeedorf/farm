@@ -120,6 +120,7 @@ model Organisation {
   customers       Customer[]
   products        Product[]
   productPrices   ProductPrice[]
+  salesOrders     SalesOrder[]
 }
 
 model Site {
@@ -166,6 +167,7 @@ model Site {
 
   @@unique([organisationId, code])
   @@index([organisationId])
+  salesOrders SalesOrder[]
 }
 
 /// A house, pen, pond or paddock. Deliberately not named "House".
@@ -373,6 +375,7 @@ model AnimalGroup {
   @@unique([siteId, code])
   @@index([siteId, closedAt])
   @@index([productionUnitId])
+  salesOrdersDrawnFrom SalesOrder[]
 }
 
 /// A DECISION SOMEBODY MADE, which is why it is stored when the alert itself is
@@ -1381,6 +1384,9 @@ model User {
   ordersCancelled    PurchaseOrder[]    @relation("PurchaseOrderCancelledBy")
   attendance         AttendanceEvent[]  @relation("AttendanceSubject")
   attendanceRecorded AttendanceEvent[]  @relation("AttendanceRecorder")
+  salesOrdersCreated   SalesOrder[]         @relation("SalesOrderCreatedBy")
+  salesOrdersConfirmed SalesOrder[]         @relation("SalesOrderConfirmedBy")
+  salesOrdersCancelled SalesOrder[]         @relation("SalesOrderCancelledBy")
   pricesSet          ProductPrice[]         @relation("PriceSetBy")
   customersCreated   Customer[]             @relation("CustomerCreatedBy")
   customersArchived  Customer[]             @relation("CustomerArchivedBy")
@@ -1577,6 +1583,7 @@ model Customer {
   archiveReason  String?
 
   prices       ProductPrice[]
+  salesOrders  SalesOrder[]
   organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   createdBy    User?        @relation("CustomerCreatedBy", fields: [createdById], references: [id])
   archivedBy   User?        @relation("CustomerArchivedBy", fields: [archivedById], references: [id])
@@ -1619,6 +1626,7 @@ model Product {
   organisation Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   grade        ProductionGrade? @relation(fields: [gradeId], references: [id])
   prices       ProductPrice[]
+  salesOrderLines SalesOrderLine[]
 
   @@unique([organisationId, sku])
   @@index([organisationId, isActive])
@@ -1660,6 +1668,96 @@ model ProductPrice {
   /// The lookup every quote makes.
   @@index([organisationId, productId, effectiveFrom])
   @@index([customerId, effectiveFrom])
+}
+
+enum SalesOrderState {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+}
+
+/// WHAT A BUYER ASKED FOR, at what price, on what day.
+///
+/// The states are what somebody DID — wrote it, confirmed it, cancelled it.
+/// "Delivered" and "paid" are deliberately absent: the first is what dispatch
+/// records add up to, and the second needs a payment ledger that does not exist
+/// because the payment provider has not been chosen. A status column for either
+/// would be a second copy of a fact, free to disagree with the rows beneath it.
+model SalesOrder {
+  id             String          @id @default(cuid())
+  organisationId String
+  siteId         String
+  customerId     String
+
+  orderNumber    String
+  state          SalesOrderState @default(DRAFT)
+
+  orderedOn      DateTime @db.Date
+  /// When the buyer wants it. Null while nobody has said.
+  wantedOn       DateTime? @db.Date
+
+  /// Which house the produce is drawn from, where the farm has said.
+  ///
+  /// NULL IS ORDINARY — eggs are pooled in the store and a crate usually cannot
+  /// be traced to a house. It becomes REQUIRED the moment any house is inside a
+  /// withdrawal period, because that is the only circumstance in which the
+  /// answer changes whether the sale may happen at all. See withdrawalGate() in
+  /// src/lib/sales.ts.
+  drawnFromFlockId String?
+
+  notes          String?
+
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  confirmedAt    DateTime?
+  confirmedById  String?
+  cancelledAt    DateTime?
+  cancelledById  String?
+  cancelReason   String?
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  site         Site         @relation(fields: [siteId], references: [id])
+  customer     Customer     @relation(fields: [customerId], references: [id])
+  drawnFrom    AnimalGroup? @relation(fields: [drawnFromFlockId], references: [id])
+  createdBy    User?        @relation("SalesOrderCreatedBy", fields: [createdById], references: [id])
+  confirmedBy  User?        @relation("SalesOrderConfirmedBy", fields: [confirmedById], references: [id])
+  cancelledBy  User?        @relation("SalesOrderCancelledBy", fields: [cancelledById], references: [id])
+  lines        SalesOrderLine[]
+
+  @@unique([organisationId, orderNumber])
+  @@index([organisationId, state])
+  @@index([customerId, orderedOn])
+}
+
+/// A line on a sales order.
+///
+/// THE PRICE IS COPIED HERE, not looked up later. Prices are dated rows so the
+/// March figure is always retrievable — but the farm sometimes agrees a one-off
+/// price that is on no list at all, and a total recomputed on every page load is
+/// a total that can change after a customer has been told it.
+model SalesOrderLine {
+  id           String @id @default(cuid())
+  salesOrderId String
+  productId    String
+
+  /// Whole packs. Half a crate is a tray, and a tray is its own product.
+  quantity     Int
+  /// Per pack, in PESEWAS, as agreed at the time.
+  unitPricePesewas Int
+  /// LIST, AGREED or MANUAL — where that figure came from. Recorded because it
+  /// is the first thing anybody asks when a total looks wrong.
+  priceBasis   String
+  note         String?
+
+  createdAt    DateTime @default(now())
+
+  order   SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  product Product    @relation(fields: [productId], references: [id])
+
+  @@index([salesOrderId])
+  @@index([productId])
 }
 
 model LoginAttempt {

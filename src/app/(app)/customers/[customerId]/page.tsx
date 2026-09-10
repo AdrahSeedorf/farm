@@ -4,8 +4,11 @@ import { notFound } from 'next/navigation';
 import { pageGuard, currentUserCan } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
 import { customerById } from '@/lib/customer-service';
+import { listOrders } from '@/lib/sales-service';
+import { sortOrders, committedSentence, STATE_LABELS } from '@/lib/sales';
+import { formatGHS } from '@/lib/money';
 import { displayName, isArchived, KIND_LABELS } from '@/lib/customers';
-import { BRAND, formatGhanaPhone, telLink } from '@/lib/brand';
+import { formatGhanaPhone, telLink } from '@/lib/brand';
 import { ArchiveForm, RestoreForm } from '../CustomerForms';
 
 export const metadata: Metadata = { title: 'Buyer' };
@@ -21,11 +24,16 @@ export default async function CustomerPage({
   if (!allowed) return <Forbidden area="buyers" roles={principal.roles} />;
 
   const { customerId } = await params;
-  const [customer, canEdit] = await Promise.all([
+  const [customer, canEdit, canSeeOrders] = await Promise.all([
     customerById(principal, customerId),
     currentUserCan('customer:edit'),
+    currentUserCan('order:view'),
   ]);
   if (!customer) notFound();
+
+  const orders = canSeeOrders
+    ? sortOrders(await listOrders(principal, { customerId }))
+    : [];
 
   const archived = isArchived(customer);
 
@@ -124,19 +132,45 @@ export default async function CustomerPage({
         </p>
       ) : null}
 
-      {/* ORDERS AND BALANCES ARE NOT HERE YET, and the page says so rather than
-          leaving a silence that reads as "this buyer has never bought anything".
-          Those arrive with the rest of Milestone 15. */}
-      <section className="mt-8 rounded-card border border-border-default bg-surface-sunken p-6">
-        <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-text-muted">
-          Orders and balance
-        </h2>
-        <p className="mt-2 text-[14px] text-text-secondary">
-          Not built yet. When selling is in, this is where what {customer.name} has ordered and
-          what they owe will sit — {BRAND.name} is not taking orders through this system today,
-          so nothing is missing from the record.
-        </p>
-      </section>
+      {/* WHAT WAS AGREED, AND NOT CALLED A BALANCE. A balance is what is owed,
+          and that needs payments, which are not recorded anywhere yet. Putting
+          the word "balance" on this figure would put a number on a screen that
+          a farm would chase somebody for. */}
+      {canSeeOrders ? (
+        <section className="mt-8 rounded-card border border-border-default bg-surface-card p-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-brand-accent">
+              Orders
+            </h2>
+            <Link href="/orders/new" className="text-[14px] font-semibold text-brand-primary">
+              Take an order
+            </Link>
+          </div>
+
+          <p className="mt-3 text-[15px] text-text-primary">{committedSentence(orders)}</p>
+
+          {orders.length > 0 ? (
+            <ul className="mt-4 divide-y divide-border-default">
+              {orders.slice(0, 8).map((order) => (
+                <li key={order.id} className="flex flex-wrap items-baseline justify-between gap-x-3 py-2.5">
+                  <Link
+                    href={`/orders/${order.id}`}
+                    className="text-[15px] font-semibold text-text-primary hover:text-brand-primary"
+                  >
+                    {order.orderNumber}
+                    <span className="ml-2 font-normal text-text-muted">
+                      {STATE_LABELS[order.state]}
+                    </span>
+                  </Link>
+                  <span className="tabular text-[15px] font-semibold text-text-primary">
+                    {formatGHS(order.totalPesewas)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
 
       {canEdit && !archived ? (
         <div className="mt-8 border-t border-border-default pt-5">
