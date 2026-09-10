@@ -37,6 +37,7 @@ const ITEMS: { href: string; label: string; permission: Permission | Permission[
   { href: '/purchases', label: 'Purchases', permission: 'procurement:view' },
   { href: '/suppliers', label: 'Suppliers', permission: 'supplier:view' },
   { href: '/orders', label: 'Orders', permission: 'order:view' },
+  { href: '/dispatch', label: 'Loads out', permission: 'delivery:view' },
   { href: '/pricing', label: 'Prices', permission: 'product:view' },
   { href: '/customers', label: 'Buyers', permission: 'customer:view' },
   { href: '/enquiries', label: 'Enquiries', permission: 'customer:view' },

@@ -121,6 +121,7 @@ model Organisation {
   products        Product[]
   productPrices   ProductPrice[]
   salesOrders     SalesOrder[]
+  dispatches      Dispatch[]
 }
 
 model Site {
@@ -168,6 +169,7 @@ model Site {
   @@unique([organisationId, code])
   @@index([organisationId])
   salesOrders SalesOrder[]
+  dispatches  Dispatch[]
 }
 
 /// A house, pen, pond or paddock. Deliberately not named "House".
@@ -1387,6 +1389,8 @@ model User {
   salesOrdersCreated   SalesOrder[]         @relation("SalesOrderCreatedBy")
   salesOrdersConfirmed SalesOrder[]         @relation("SalesOrderConfirmedBy")
   salesOrdersCancelled SalesOrder[]         @relation("SalesOrderCancelledBy")
+  dispatchesRecorded   Dispatch[]           @relation("DispatchRecordedBy")
+  dispatchesReversed   Dispatch[]           @relation("DispatchReversedBy")
   pricesSet          ProductPrice[]         @relation("PriceSetBy")
   customersCreated   Customer[]             @relation("CustomerCreatedBy")
   customersArchived  Customer[]             @relation("CustomerArchivedBy")
@@ -1627,6 +1631,7 @@ model Product {
   grade        ProductionGrade? @relation(fields: [gradeId], references: [id])
   prices       ProductPrice[]
   salesOrderLines SalesOrderLine[]
+  dispatchLines   DispatchLine[]
 
   @@unique([organisationId, sku])
   @@index([organisationId, isActive])
@@ -1725,6 +1730,7 @@ model SalesOrder {
   confirmedBy  User?        @relation("SalesOrderConfirmedBy", fields: [confirmedById], references: [id])
   cancelledBy  User?        @relation("SalesOrderCancelledBy", fields: [cancelledById], references: [id])
   lines        SalesOrderLine[]
+  dispatches   Dispatch[]
 
   @@unique([organisationId, orderNumber])
   @@index([organisationId, state])
@@ -1755,8 +1761,123 @@ model SalesOrderLine {
 
   order   SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
   product Product    @relation(fields: [productId], references: [id])
+  dispatchLines DispatchLine[]
 
   @@index([salesOrderId])
+  @@index([productId])
+}
+
+enum DispatchMethod {
+  COLLECTED
+  DELIVERED
+}
+
+/// WHAT ACTUALLY LEFT THE FARM.
+///
+/// An order is a promise; this is the moment produce stops being the farm's.
+/// Recorded separately from the order for the same reason a receipt is recorded
+/// separately from a purchase order: what was promised and what went out are
+/// different facts, and a system holding only one of them cannot explain why the
+/// store is short.
+///
+/// THE ONLY THING ON THE SALES SIDE THAT MOVES STOCK. Every live dispatch has
+/// StockMovement rows underneath it, written by dispatch-service.ts and found
+/// again by (sourceType, sourceId) = ('Dispatch', id).
+///
+/// FULFILMENT IS NOT STORED ANYWHERE. There is no `delivered` flag on an order —
+/// it is what these rows add up to. See progressOf() in src/lib/dispatch.ts.
+model Dispatch {
+  id             String @id @default(cuid())
+  organisationId String
+  siteId         String
+  salesOrderId   String
+
+  /// DSP-2026-0007 — the number on the paper that travels with the load.
+  reference      String
+  method         DispatchMethod
+
+  dispatchedOn   DateTime @db.Date
+
+  /// Who carried it, as a name.
+  ///
+  /// FREE TEXT, DELIBERATELY. A farm's driver may be a relative with no account,
+  /// and on a collection the person carrying it is the buyer. Requiring a user
+  /// record would mean inventing accounts for people who will never sign in, or
+  /// leaving the field empty on most rows — and an empty field is worse than a
+  /// written name when somebody asks who took the load. Same reasoning as
+  /// HealthEvent.vetName.
+  takenBy        String?
+  /// A registration or a description: "GT 4321-22", "the blue pickup".
+  vehicle        String?
+  /// Who took delivery at the other end. On a collection the buyer is standing
+  /// there, so it is usually empty; on a delivery it is the only record it
+  /// arrived, and its absence is warned about rather than refused.
+  receivedBy     String?
+  notes          String?
+
+  recordedById   String?
+  createdAt      DateTime @default(now())
+
+  /// REVERSED, NEVER DELETED. A dispatch has stock movements underneath it, so
+  /// removing the row would leave the ledger holding eggs that left a farm on no
+  /// record. Reversing writes the counter-movements and keeps both, with why.
+  reversedAt     DateTime?
+  reversedById   String?
+  reversalReason String?
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  site         Site         @relation(fields: [siteId], references: [id])
+  salesOrder   SalesOrder   @relation(fields: [salesOrderId], references: [id])
+  recordedBy   User?        @relation("DispatchRecordedBy", fields: [recordedById], references: [id])
+  reversedBy   User?        @relation("DispatchReversedBy", fields: [reversedById], references: [id])
+  lines        DispatchLine[]
+
+  @@unique([organisationId, reference])
+  @@index([salesOrderId])
+  @@index([organisationId, dispatchedOn])
+  @@index([siteId, dispatchedOn])
+}
+
+/// One product on one load.
+///
+/// `salesOrderLineId` NULL is something added at the gate that was never
+/// ordered. It leaves the store like anything else and counts towards no order
+/// line — forcing it onto one would make an order claim it received something
+/// nobody asked for.
+model DispatchLine {
+  id               String @id @default(cuid())
+  dispatchId       String
+  salesOrderLineId String?
+  productId        String
+
+  /// Whole packs. Half a crate is a tray, and a tray is its own product.
+  quantity         Int
+
+  /// WHAT ACTUALLY CAME OFF THE STORE, in base units, and what it could not
+  /// cover.
+  ///
+  /// These two exist because the stock ledger refuses to go below zero — a rule
+  /// worth keeping — while a load that has already gone out cannot be un-sent.
+  /// So the movements take what the store held, and the difference is written
+  /// down HERE rather than silently rounded away. A non-zero shortfall is not a
+  /// bug: it is the measured size of the gap between the shelf and the record,
+  /// and it usually means a collection went unrecorded.
+  ///
+  /// Both stay zero for a product that is not held as stock at all — a spent
+  /// hen, say. `stockReason` says which of the two it is.
+  stockMovedBase     Float  @default(0)
+  stockShortfallBase Float  @default(0)
+  /// Why no stock moved, where none did. Null when it moved normally.
+  stockReason        String?
+
+  createdAt        DateTime @default(now())
+
+  dispatch      Dispatch        @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+  salesOrderLine SalesOrderLine? @relation(fields: [salesOrderLineId], references: [id])
+  product       Product         @relation(fields: [productId], references: [id])
+
+  @@index([dispatchId])
+  @@index([salesOrderLineId])
   @@index([productId])
 }
 

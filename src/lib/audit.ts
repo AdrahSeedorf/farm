@@ -73,6 +73,9 @@ export type AuditAction =
   | 'salesOrder.source'
   | 'salesOrder.confirm'
   | 'salesOrder.cancel'
+  // A dispatch is never edited or deleted — it is reversed, which is its own act.
+  | 'dispatch.record'
+  | 'dispatch.reverse'
   | 'item.create'
   | 'item.update'
   | 'item.archive'

@@ -149,7 +149,14 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ],
 
   // Owns stock movements. Cannot set prices or see production margins.
+  //
+  // HOLDS `delivery` BECAUSE THE STORE IS WHERE PRODUCE LEAVES FROM. Sales take
+  // the order; the person standing at the store is the one who watches the
+  // crates go onto the vehicle, and recording that is the same act as any other
+  // stock issue — which this role already owns. Without it, the only people who
+  // could write down what left the farm were people who were not there.
   storekeeper: [
+    ...some('delivery', ['view', 'create']),
     ...some('inventory', ['view', 'create', 'edit', 'approve']),
     ...some('feed', ['view', 'create', 'edit']),
     ...some('procurement', ['view', 'create', 'edit']),

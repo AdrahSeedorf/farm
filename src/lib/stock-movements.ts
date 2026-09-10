@@ -315,6 +315,17 @@ export interface IssueFromStockInput {
   /** The unit that quantity is expressed in — the dimension's base unit. */
   unitKey: string;
   occurredOn: Date;
+  /**
+   * WHY IT LEFT. Defaults to ISSUE — feed to a house, vaccine to a flock.
+   *
+   * A dispatch to a buyer passes SALE. The arithmetic is identical, so it shares
+   * this function; but the ledger has to be able to tell "the farm used it" from
+   * "the farm sold it" without joining to anything, because that distinction is
+   * the difference between a cost and a sale on every report that follows.
+   * Restricted to types that take stock OUT — a positive type here would issue a
+   * negative quantity and quietly invent stock.
+   */
+  type?: Extract<StockMovementType, 'ISSUE' | 'SALE' | 'DAMAGE' | 'EXPIRY'>;
   notes?: string | null;
   sourceType?: string | null;
   sourceId?: string | null;
@@ -353,7 +364,7 @@ export async function issueFromStock(
     const movement = await recordMovementWithin(tx, principal, {
       itemId: input.itemId,
       stockLocationId: input.stockLocationId,
-      type: 'ISSUE',
+      type: input.type ?? 'ISSUE',
       quantityEntered: allocation.quantity,
       enteredUomKey: input.unitKey,
       occurredOn: input.occurredOn,

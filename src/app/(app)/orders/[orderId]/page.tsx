@@ -14,6 +14,8 @@ import {
 } from '@/lib/sales';
 import { formatGHS } from '@/lib/money';
 import { formatGhanaPhone } from '@/lib/brand';
+import { listDispatches } from '@/lib/dispatch-service';
+import { progressOf, fulfilmentSentence, packsSentence, isLive } from '@/lib/dispatch';
 import {
   AddLineForm,
   RemoveLineForm,
@@ -21,6 +23,7 @@ import {
   ConfirmForm,
   CancelOrderForm,
 } from '../OrderForms';
+import { RecordLoadForm } from '../../dispatch/DispatchForms';
 
 export const metadata: Metadata = { title: 'Order' };
 
@@ -37,17 +40,21 @@ export default async function OrderPage({
   const { orderId } = await params;
   // See the note on the orders list: a driver may read an order and may not read
   // what it is worth. The figures are omitted from the markup, not hidden in it.
-  const [order, canEdit, canSeeMoney] = await Promise.all([
+  const [order, canEdit, canSeeMoney, canSeeLoads, canDispatchThis] = await Promise.all([
     orderById(principal, orderId),
     currentUserCan('order:edit'),
     currentUserCan('price:view'),
+    currentUserCan('delivery:view'),
+    currentUserCan('delivery:create'),
   ]);
   if (!order) notFound();
 
-  const [{ products, flocks }, verdict] = await Promise.all([
+  const [{ products, flocks }, verdict, dispatches] = await Promise.all([
     orderContext(principal),
     withdrawalCheck(principal, order),
+    canSeeLoads ? listDispatches(principal, { salesOrderId: order.id }) : Promise.resolve([]),
   ]);
+  const progress = progressOf(order.lines, dispatches);
 
   const editable = linesAreEditable(order.state);
   const locked = whyLinesAreLocked(order.state);
@@ -224,17 +231,81 @@ export default async function OrderPage({
         </p>
       ) : null}
 
+      {/* WHAT HAS ACTUALLY GONE OUT.
+          Derived from the dispatch rows every time — there is no `delivered`
+          flag anywhere, because a flag is what starts disagreeing with the rows
+          beneath it. */}
+      {canSeeLoads && order.state !== 'DRAFT' ? (
+        <section className="mt-6 rounded-card border border-border-default bg-surface-card p-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+            <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-brand-accent">
+              What has gone out
+            </h2>
+            {dispatches.length > 0 ? (
+              <Link href="/dispatch" className="text-[13px] font-semibold text-brand-primary">
+                All loads
+              </Link>
+            ) : null}
+          </div>
+
+          <p className="mt-3 text-[15px] text-text-primary">{fulfilmentSentence(progress)}</p>
+
+          {dispatches.length > 0 ? (
+            <ul className="mt-3 space-y-1.5">
+              {dispatches.map((d) => (
+                <li key={d.id} className="text-[13.5px]">
+                  <Link
+                    href={`/dispatch/${d.id}`}
+                    className={`font-semibold hover:underline ${
+                      isLive(d) ? 'text-brand-primary' : 'text-text-muted line-through'
+                    }`}
+                  >
+                    {d.reference}
+                  </Link>
+                  <span className="text-text-secondary">
+                    {' '}
+                    · {day(d.dispatchedOn)} · {packsSentence(d.lines)}
+                    {isLive(d) ? '' : ' · reversed'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {canDispatchThis && order.state === 'CONFIRMED' ? (
+            <div className="mt-5 border-t border-border-default pt-5">
+              <h3 className="text-[15px] font-semibold text-text-primary">Record a load</h3>
+              <p className="mt-1 mb-4 text-[13.5px] text-text-secondary">
+                This takes produce off the store. Leave a box blank for anything that did not go.
+              </p>
+              <RecordLoadForm
+                orderId={order.id}
+                lines={progress.map((p) => ({
+                  id: p.lineId,
+                  productName: p.productName,
+                  packLabel: p.packLabel,
+                  ordered: p.ordered,
+                  dispatched: p.dispatched,
+                  outstanding: p.outstanding,
+                }))}
+                today={day(new Date())}
+              />
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       {/* WHAT THIS ORDER DOES NOT DO, said plainly. A confirmed order that
-          silently failed to move stock or record money would be discovered by
-          somebody counting the store. */}
+          silently failed to record money would be discovered by somebody
+          counting the takings. */}
       <section className="mt-8 rounded-card border border-border-default bg-surface-sunken p-6">
         <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-text-muted">
           What this does not do
         </h2>
         <p className="mt-2 text-[14px] text-text-secondary">
-          Confirming an order is a promise, not a movement. Nothing leaves the store until
-          somebody dispatches it, and no money is recorded — how payment is taken has not been
-          decided, so there is deliberately nowhere to record it yet.
+          Confirming an order is a promise, not a movement — produce leaves the store only when
+          somebody records a load against it. No money is recorded anywhere: how payment is taken
+          has not been decided, so there is deliberately nowhere to put it yet.
         </p>
       </section>
 
