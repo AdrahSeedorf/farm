@@ -20,6 +20,10 @@ import {
   groupAlerts,
   daysStanding,
   standingSentence,
+  partitionAcknowledged,
+  parkErrors,
+  parkSentence,
+  MAX_PARK_DAYS,
   type Alert,
 } from '@/lib/alerts';
 import type { Permission } from '@/lib/rbac';
@@ -545,3 +549,130 @@ describe('how long it has been standing', () => {
     expect(daysStanding(future, NOW)).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe('parking an alert', () => {
+  const asOf = NOW;
+  const ok = { note: 'Feed ordered, arriving Thursday', until: new Date(NOW.getTime() + 3 * DAY) };
+
+  it('accepts a reason and a date', () => {
+    expect(parkErrors(ok, asOf)).toEqual([]);
+  });
+
+  // The same rule as closing an incident: a park with no reason is one somebody
+  // made disappear, and the parked list is unreadable without it.
+  it('REQUIRES A REASON', () => {
+    expect(parkErrors({ ...ok, note: '' }, asOf)[0]).toMatch(/why/i);
+    expect(parkErrors({ ...ok, note: '  ' }, asOf)[0]).toMatch(/why/i);
+    expect(parkErrors({ ...ok, note: 'ok' }, asOf)[0]).toMatch(/why/i);
+  });
+
+  it('requires a date', () => {
+    expect(parkErrors({ ...ok, until: null }, asOf)[0]).toMatch(/when/i);
+    expect(parkErrors({ ...ok, until: new Date('nonsense') }, asOf)[0]).toMatch(/when/i);
+  });
+
+  it('refuses a date already past', () => {
+    expect(
+      parkErrors({ ...ok, until: new Date(NOW.getTime() - DAY) }, asOf)[0],
+    ).toMatch(/already past/i);
+  });
+
+  // THERE IS NO FOREVER. A permanent dismissal is how a condition that is still
+  // true becomes invisible, and nobody ever goes back and un-dismisses one.
+  it('CAPS HOW LONG SOMETHING CAN BE SILENCED', () => {
+    const justInside = new Date(NOW.getTime() + (MAX_PARK_DAYS - 1) * DAY);
+    const tooFar = new Date(NOW.getTime() + (MAX_PARK_DAYS + 1) * DAY);
+    expect(parkErrors({ ...ok, until: justInside }, asOf)).toEqual([]);
+    expect(parkErrors({ ...ok, until: tooFar }, asOf)[0]).toMatch(/longest/i);
+  });
+
+  it('says who parked it and why, not just that it is parked', () => {
+    const sentence = parkSentence(
+      { byName: 'Owner', note: 'Feed ordered', until: new Date(NOW.getTime() + 3 * DAY) },
+      asOf,
+    );
+    expect(sentence).toContain('Owner');
+    expect(sentence).toContain('Feed ordered');
+    expect(sentence).toMatch(/back in 3 days/);
+  });
+
+  it('reads naturally the day before it returns', () => {
+    expect(
+      parkSentence(
+        { byName: 'Ama', note: 'x', until: new Date(NOW.getTime() + 12 * 3600_000) },
+        asOf,
+      ),
+    ).toMatch(/back tomorrow/);
+  });
+});
+
+describe('partitioning', () => {
+  const live = buildAlert('stock.out', { subject: 'i1', headline: 'out', detail: '', href: '/' });
+  const held = buildAlert('task.overdue', { subject: 't1', headline: 'late', detail: '', href: '/' });
+
+  // PARKED IS NOT GONE. The count and the list stay on the page, so a farm can
+  // always answer "what are we currently ignoring?".
+  it('keeps a parked alert rather than dropping it', () => {
+    const { live: shouting, parked } = partitionAcknowledged(
+      [live, held],
+      new Map([[held.key, new Date(NOW.getTime() + DAY)]]),
+      NOW,
+    );
+    expect(shouting.map((a) => a.key)).toEqual([live.key]);
+    expect(parked.map((a) => a.key)).toEqual([held.key]);
+  });
+
+  it('brings one back when its date passes', () => {
+    const { live: shouting, parked } = partitionAcknowledged(
+      [live, held],
+      new Map([[held.key, new Date(NOW.getTime() - 1)]]),
+      NOW,
+    );
+    expect(shouting).toHaveLength(2);
+    expect(parked).toHaveLength(0);
+  });
+
+  it('leaves everything live when nothing is parked', () => {
+    const { live: shouting, parked } = partitionAcknowledged([live, held], new Map(), NOW);
+    expect(shouting).toHaveLength(2);
+    expect(parked).toHaveLength(0);
+  });
+});
+
+describe('who may park', () => {
+  it('every rule names a permission that exists', () => {
+    const real = new Set<string>(PERMISSIONS);
+    for (const rule of ALERT_RULES) {
+      expect(real.has(RULE_CATALOGUE[rule].ackPermission)).toBe(true);
+    }
+  });
+
+  // PARKING IS ALWAYS NARROWER THAN SEEING. Parking is farm-wide, so being able
+  // to read an alert must never be enough to silence it for everybody.
+  it('NEVER LETS A VIEWER PARK WHAT THEY CANNOT ACT ON', () => {
+    for (const rule of ALERT_RULES) {
+      const d = RULE_CATALOGUE[rule];
+      expect(d.ackPermission, rule).not.toBe(d.permission);
+      expect(d.ackPermission.endsWith(':view'), rule).toBe(false);
+    }
+  });
+
+  // The case that settles the design: a worker can SEE that their own report is
+  // going unread — that is why it is shown to them — but must not be able to
+  // hide that fact from the owner.
+  it('does not let a worker park their own unread report', () => {
+    const worker = new Set<Permission>([
+      'dailyRecord:view',
+      'flock:view',
+      'task:view',
+      'task:edit',
+      'incident:view',
+    ]);
+    const d = RULE_CATALOGUE['incident.unattended'];
+    expect(worker.has(d.permission)).toBe(true);
+    expect(worker.has(d.ackPermission)).toBe(false);
+  });
+});
+

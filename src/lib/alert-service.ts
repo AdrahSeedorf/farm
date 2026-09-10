@@ -8,6 +8,7 @@ import {
   dedupe,
   sortAlerts,
   visibleTo,
+  partitionAcknowledged,
   mortalityLevel,
   thresholdsFrom,
   thresholdBasisSentence,
@@ -26,6 +27,7 @@ import { isOverdue, daysOverdue } from '@/lib/tasks';
 import { isUnattended, daysWaiting } from '@/lib/incidents';
 import { elapsedHours, STALE_OPEN_SHIFT_HOURS } from '@/lib/attendance';
 import { BASE_UNIT, formatQuantity } from '@/lib/uom';
+import { activeParks, untilByKey, type Park } from '@/lib/alert-ack-service';
 
 /**
  * Alert gathering — ADRAH Farms
@@ -504,7 +506,17 @@ const GATHERERS: { permission: Permission; gather: Gatherer }[] = [
  *   rather than quietly showing a shorter list.
  */
 export interface AlertsResult {
+  /** Still shouting. */
   alerts: Alert[];
+  /**
+   * Conditions somebody has taken responsibility for, with who and why.
+   *
+   * RETURNED, NOT DISCARDED. A parked alert is still a true statement about the
+   * farm; the only thing that changed is that a person said they have it. The
+   * page shows the count and a link, so "what are we currently ignoring?" always
+   * has an answer.
+   */
+  parked: { alert: Alert; park: Park }[];
   /** Permissions whose gatherer threw. The page tells the reader. */
   failed: Permission[];
 }
@@ -531,7 +543,22 @@ export async function alertsFor(
 
   // `visibleTo` is redundant given the guard above, and stays on purpose: it is
   // the check that still holds if somebody adds a gatherer and forgets one.
-  return { alerts: sortAlerts(visibleTo(dedupe(alerts), held)), failed };
+  //
+  // PERMISSION IS APPLIED BEFORE PARKING, not after. An alert the reader may not
+  // see must not appear in their parked list either — the note on a park about a
+  // supplier's late delivery names the supplier.
+  const visible = sortAlerts(visibleTo(dedupe(alerts), held));
+
+  const parks = await activeParks(principal, asOf);
+  const { live, parked } = partitionAcknowledged(visible, untilByKey(parks), asOf);
+
+  return {
+    alerts: live,
+    parked: parked
+      .map((alert) => ({ alert, park: parks.get(alert.key)! }))
+      .filter((p) => p.park !== undefined),
+    failed,
+  };
 }
 
 /**

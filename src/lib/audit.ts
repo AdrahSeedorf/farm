@@ -48,6 +48,10 @@ export type AuditAction =
   | 'incident.report'
   | 'incident.review'
   | 'incident.close'
+  // Parking an alert silences it FOR EVERYBODY, so it goes in the log next to
+  // the other acts that change what the farm can see.
+  | 'alert.park'
+  | 'alert.lift'
   | 'item.create'
   | 'item.update'
   | 'item.archive'

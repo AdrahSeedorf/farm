@@ -134,6 +134,21 @@ export interface RuleDefinition {
    * HTML source of a page a worker can open.
    */
   permission: Permission;
+  /**
+   * THE PERMISSION REQUIRED TO PARK IT — to say "I have this, stop telling us".
+   *
+   * Separate from `permission`, and always narrower. Seeing an alert and being
+   * one of the people who acts on it are different things, and parking is
+   * farm-wide: one person's decision silences the screen for everybody.
+   *
+   * The case that settles it is `incident.unattended`. A worker holds
+   * `incident:view` and can see that their own report is going unread — which is
+   * the whole point of showing it to them — but parking it needs
+   * `incident:edit`, so they cannot hide from the owner the fact that nobody has
+   * read what they wrote. Every other rule follows the same shape: you may park
+   * what you are able to do something about.
+   */
+  ackPermission: Permission;
   /** What the rule watches, in one line, shown on the rules screen. */
   what: string;
   /** Why it is worth interrupting somebody for. */
@@ -145,6 +160,7 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     label: 'Out of stock',
     level: 'CRITICAL',
     permission: 'inventory:view',
+    ackPermission: 'inventory:edit',
     what: 'An item in regular use has nothing left.',
     why: 'Birds do not wait for a delivery. This is the one stock condition that costs money the same day.',
   },
@@ -152,6 +168,7 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     label: 'Needs ordering',
     level: 'ATTENTION',
     permission: 'inventory:view',
+    ackPermission: 'inventory:edit',
     what: 'Stock will run out before a delivery ordered today could arrive.',
     why: 'Measured against the supplier’s own lead time, so it fires when ordering has to start — not at a number of days that means nothing on its own.',
   },
@@ -159,6 +176,7 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     label: 'Expired stock still counted',
     level: 'ATTENTION',
     permission: 'inventory:view',
+    ackPermission: 'inventory:edit',
     what: 'A batch is past its expiry date and still counted as stock.',
     why: 'It inflates every days-of-cover figure on the farm, and somebody will eventually use it.',
   },
@@ -166,6 +184,7 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     label: 'Health programme overdue',
     level: 'CRITICAL',
     permission: 'health:view',
+    ackPermission: 'health:edit',
     what: 'A scheduled vaccination or treatment has passed its date.',
     why: 'The programme is the farm’s own; missing a date on it is the farm departing from a plan it made.',
   },
@@ -173,6 +192,7 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     label: 'Health programme due',
     level: 'ATTENTION',
     permission: 'health:view',
+    ackPermission: 'health:edit',
     what: 'A scheduled vaccination or treatment falls due shortly.',
     why: 'Vaccines have to be in the store before the day, and the store is two weeks from the supplier.',
   },
@@ -180,6 +200,7 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     label: 'Withdrawal period in force',
     level: 'CRITICAL',
     permission: 'health:view',
+    ackPermission: 'health:edit',
     what: 'A withdrawal period is in force — produce from this flock must not be sold.',
     why: 'Selling inside a withdrawal period is a food-safety breach, not an inefficiency.',
   },
@@ -187,6 +208,7 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     label: 'Programme not vet-reviewed',
     level: 'NOTICE',
     permission: 'health:view',
+    ackPermission: 'health:edit',
     what: 'A flock is following a health programme no vet has signed off.',
     why: 'The software will schedule the doses either way. Whether a vet has looked at the schedule is a fact the farm should be able to see, not one it discovers during an inspection.',
   },
@@ -194,6 +216,7 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     label: 'Deaths above the threshold',
     level: 'CRITICAL',
     permission: 'flock:view',
+    ackPermission: 'flock:edit',
     what: 'Deaths in a day exceeded the figure set for that stage of life.',
     why: 'The earliest signal of disease a farm gets without a laboratory.',
   },
@@ -201,6 +224,7 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     label: 'Deaths above the recent average',
     level: 'ATTENTION',
     permission: 'flock:view',
+    ackPermission: 'flock:edit',
     what: 'Deaths today are several times the recent daily average.',
     why: 'Catches a flock whose absolute rate is still inside the threshold but whose shape has changed.',
   },
@@ -208,6 +232,7 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     label: 'No record entered today',
     level: 'ATTENTION',
     permission: 'dailyRecord:view',
+    ackPermission: 'dailyRecord:approve',
     what: 'A house has no record for today by the cut-off time.',
     why: 'A missing day is not a gap in a report — it is a day nobody counted the birds, and it cannot be recovered afterwards.',
   },
@@ -215,6 +240,7 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     label: 'Order is late',
     level: 'ATTENTION',
     permission: 'procurement:view',
+    ackPermission: 'procurement:edit',
     what: 'A purchase order is past the date it was expected and still not fully received.',
     why: 'A late order is only discovered by asking. Nobody asks on a busy morning.',
   },
@@ -222,6 +248,7 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     label: 'Task overdue',
     level: 'ATTENTION',
     permission: 'task:view',
+    ackPermission: 'task:edit',
     what: 'A task is past its due date and not finished.',
     why: 'Tasks with dates on them were given dates for a reason.',
   },
@@ -229,6 +256,7 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     label: 'Report nobody has read',
     level: 'CRITICAL',
     permission: 'incident:view',
+    ackPermission: 'incident:edit',
     what: 'Somebody reported something and nobody has recorded looking at it.',
     why: 'The reporting rate is the only number this module has, and it collapses the first time a report is ignored.',
   },
@@ -236,6 +264,7 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     label: 'Still clocked in',
     level: 'ATTENTION',
     permission: 'attendance:view',
+    ackPermission: 'attendance:edit',
     what: 'Somebody is still clocked in long after any plausible shift.',
     why: 'Almost always a forgotten clock-out. Occasionally it is not, and that is the case worth checking.',
   },
@@ -586,6 +615,106 @@ export function withoutAcknowledged(
     const until = acknowledged.get(a.key) ?? null;
     return until !== null && until.getTime() <= asOf.getTime();
   });
+}
+
+/**
+ * Split a list into what is still shouting and what somebody has parked.
+ *
+ * PARKED IS NOT GONE. The page shows a count and a link, so an alert nobody is
+ * being nagged about can still be found, and a farm can always answer "what are
+ * we currently ignoring?" — which is the question that matters when something
+ * goes wrong six weeks later.
+ */
+export function partitionAcknowledged(
+  alerts: Alert[],
+  acknowledged: ReadonlyMap<string, Date | null>,
+  asOf: Date = new Date(),
+): { live: Alert[]; parked: Alert[] } {
+  const live = withoutAcknowledged(alerts, acknowledged, asOf);
+  const liveKeys = new Set(live.map((a) => a.key));
+  return { live, parked: alerts.filter((a) => !liveKeys.has(a.key)) };
+}
+
+// ---------------------------------------------------------------------------
+// PARKING ONE
+// ---------------------------------------------------------------------------
+
+/**
+ * The longest an alert may be parked for.
+ *
+ * NINETY DAYS, AND THERE IS NO "FOREVER".
+ *
+ *   A permanent dismissal is how a real problem becomes invisible: the condition
+ *   is still there, the ledger still says so, and the one screen whose job is to
+ *   say so has been told to stop. Nobody ever goes back and un-dismisses it,
+ *   because by then nobody remembers it was dismissed.
+ *
+ *   An expiry forces the farm to look again. If the condition has cleared by
+ *   then the alert simply does not return — it is derived, so a problem that was
+ *   actually dealt with costs nobody a second glance. Only a condition that is
+ *   STILL TRUE comes back, which is exactly the one worth being asked about
+ *   twice.
+ *
+ *   The case this frustrates is real — a NOTICE that will never clear, like a
+ *   health programme on a farm with no vet yet. Ninety days is long enough that
+ *   it is a quarterly annoyance rather than a daily one, and the honest fix for
+ *   that case is to get the programme reviewed, not to teach the software to
+ *   stay quiet about it permanently.
+ */
+export const MAX_PARK_DAYS = 90;
+
+/**
+ * A note is required, and it is not bureaucracy.
+ *
+ * "Feed ordered, arriving Thursday" is the difference between an alert somebody
+ * handled and an alert somebody made disappear, and it is the only thing that
+ * makes the parked list readable by anyone other than the person who parked it.
+ * The same rule as closing an incident, for the same reason.
+ */
+export function parkErrors(
+  input: { note: string; until: Date | null },
+  asOf: Date = new Date(),
+): string[] {
+  const problems: string[] = [];
+
+  if (input.note.trim().length < 3) {
+    problems.push('Say why in a few words — a parked alert with no reason is one somebody made disappear.');
+  }
+
+  if (!input.until || Number.isNaN(input.until.getTime())) {
+    problems.push('Choose when this should come back.');
+    return problems;
+  }
+
+  if (input.until.getTime() <= asOf.getTime()) {
+    problems.push('That is already past, so it would come back immediately. Pick a date ahead.');
+  }
+
+  const limit = asOf.getTime() + MAX_PARK_DAYS * 86_400_000;
+  if (input.until.getTime() > limit) {
+    problems.push(
+      `${MAX_PARK_DAYS} days is the longest an alert can be parked. Anything that needs silencing for longer than that is a condition to fix, not a reminder to switch off.`,
+    );
+  }
+
+  return problems;
+}
+
+/**
+ * What the parked list says about one entry.
+ *
+ * NAMES THE PERSON. A farm-wide park means one person's decision silences the
+ * screen for everybody, which is right on a three-person farm and only
+ * defensible if everybody can see whose decision it was.
+ */
+export function parkSentence(
+  park: { byName: string; note: string; until: Date },
+  asOf: Date = new Date(),
+): string {
+  const days = Math.ceil((park.until.getTime() - asOf.getTime()) / 86_400_000);
+  const back =
+    days <= 0 ? 'due back now' : days === 1 ? 'back tomorrow' : `back in ${days} days`;
+  return `${park.byName} parked this — “${park.note}” — ${back}.`;
 }
 
 // ---------------------------------------------------------------------------

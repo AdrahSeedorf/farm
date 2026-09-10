@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { deltaFor, type AnimalGroupEventType } from '@/lib/ledger';
 import { ageInDays } from '@/lib/metrics';
 import type { Principal } from '@/lib/rbac';
+import { orgFilter, siteFilter } from '@/lib/scope';
 
 /**
  * Flock service — ADRAH Farms
@@ -159,6 +160,93 @@ export async function populationsFor(
   for (const id of animalGroupIds) map.set(id, 0);
   for (const row of rows) map.set(row.animalGroupId, row._sum.delta ?? 0);
   return map;
+}
+
+
+/**
+ * The whole farm's headline population, for the owner's morning screen.
+ *
+ * SITE-SCOPED IN THE QUERY. A supervisor covering one farm sees one farm's
+ * birds, never a total that quietly includes a site they cannot open.
+ *
+ * THE OPENING POPULATION IS DERIVED BY SUBTRACTION, not by a second sum over
+ * history: alive now, minus everything that changed today. Both come from the
+ * same ledger read a moment apart, so the two figures cannot disagree with each
+ * other — which they could if one counted "events before today" and the other
+ * counted "all events" in separate round trips with a placement landing between
+ * them.
+ *
+ * `groups` is returned because ZERO BIRDS AND NO FLOCK ARE DIFFERENT FACTS. A
+ * farm that has not taken delivery yet must not be shown "0 birds alive" beside
+ * a mortality figure, as though something had gone wrong.
+ */
+export interface FarmTotals {
+  /** Alive right now, across every open group in scope. */
+  alive: number;
+  /** Alive at the start of today — the denominator for today's rate. */
+  openingPopulation: number;
+  /** Deaths today. Culls are counted separately: one is loss, one is a decision. */
+  deathsToday: number;
+  cullsToday: number;
+  soldToday: number;
+  /** Open groups counted. Zero means nothing is placed, not that nothing lives. */
+  groups: number;
+}
+
+export async function farmTotals(
+  principal: Principal,
+  asOf: Date = new Date(),
+): Promise<FarmTotals> {
+  const today = new Date(
+    Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate()),
+  );
+
+  const groups = await db.animalGroup.findMany({
+    // AnimalGroup carries no organisationId — it reaches the organisation
+    // through its site, so the org filter is nested and the site filter is not.
+    where: { site: orgFilter(principal), ...siteFilter(principal), closedAt: null },
+    select: { id: true },
+  });
+
+  if (groups.length === 0) {
+    return {
+      alive: 0,
+      openingPopulation: 0,
+      deathsToday: 0,
+      cullsToday: 0,
+      soldToday: 0,
+      groups: 0,
+    };
+  }
+
+  const ids = groups.map((g) => g.id);
+
+  const [everything, todayByType] = await Promise.all([
+    db.animalGroupEvent.aggregate({
+      where: { animalGroupId: { in: ids } },
+      _sum: { delta: true },
+    }),
+    db.animalGroupEvent.groupBy({
+      by: ['type'],
+      where: { animalGroupId: { in: ids }, occurredOn: { gte: today } },
+      _sum: { delta: true },
+    }),
+  ]);
+
+  const sumOf = (type: AnimalGroupEventType) =>
+    todayByType.find((r) => r.type === type)?._sum.delta ?? 0;
+
+  const alive = everything._sum.delta ?? 0;
+  const netToday = todayByType.reduce((total, r) => total + (r._sum.delta ?? 0), 0);
+
+  return {
+    alive,
+    openingPopulation: alive - netToday,
+    deathsToday: Math.abs(sumOf('MORTALITY')),
+    cullsToday: Math.abs(sumOf('CULL')),
+    soldToday: Math.abs(sumOf('SALE')),
+    groups: groups.length,
+  };
 }
 
 /** Total birds placed — the denominator for cumulative mortality. */

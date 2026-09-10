@@ -4,6 +4,8 @@ import { requirePrincipal } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
 import { permissionsFor } from '@/lib/rbac';
 import { alertsFor } from '@/lib/alert-service';
+import { canPark } from '@/lib/alert-ack-service';
+import { ParkForm, LiftForm } from './AlertForms';
 import {
   RULE_CATALOGUE,
   ALERT_RULES,
@@ -11,6 +13,7 @@ import {
   alertSummary,
   groupAlerts,
   standingSentence,
+  parkSentence,
   type AlertLevel,
 } from '@/lib/alerts';
 
@@ -59,7 +62,7 @@ export default async function AlertsPage() {
   if (readable.length === 0) return <Forbidden area="alerts" roles={principal.roles} />;
 
   const now = new Date();
-  const { alerts, failed } = await alertsFor(principal, now);
+  const { alerts, parked, failed } = await alertsFor(principal, now);
   const summary = alertSummary(alerts);
   const groups = groupAlerts(alerts);
 
@@ -103,11 +106,18 @@ export default async function AlertsPage() {
 
       {alerts.length === 0 ? (
         <section className="mt-8 rounded-card border border-border-default bg-surface-card p-6">
-          <p className="text-[15px] font-medium text-text-primary">Nothing needs you.</p>
+          <p className="text-[15px] font-medium text-text-primary">
+            {parked.length > 0
+              ? 'Nothing needs you right now.'
+              : 'Nothing needs you.'}
+          </p>
           <p className="mt-2 text-[14px] text-text-secondary">
             {readable.length} {readable.length === 1 ? 'check is' : 'checks are'} running against
             your farm — stock cover, the health programme, deaths, records, orders, tasks,
-            reports and the clock. Nothing has crossed a line.{' '}
+            reports and the clock.{' '}
+            {parked.length > 0
+              ? `Everything that has crossed a line is parked — ${parked.length} below.`
+              : 'Nothing has crossed a line.'}{' '}
             <Link href="/alerts/rules" className="font-semibold text-brand-primary hover:underline">
               See what each one watches
             </Link>
@@ -148,6 +158,10 @@ export default async function AlertsPage() {
                       {standing ? (
                         <p className="mt-0.5 text-[12.5px] text-text-muted">{standing}</p>
                       ) : null}
+                      {/* Offered only to somebody who can act on it — parking is
+                          farm-wide, so seeing an alert is not enough. The server
+                          checks again; this only decides whether to ask. */}
+                      {canPark(principal, alert.rule) ? <ParkForm alertKey={alert.key} /> : null}
                     </li>
                   );
                 })}
@@ -157,7 +171,39 @@ export default async function AlertsPage() {
         })}
       </div>
 
-      {alerts.length > 0 ? (
+      {/* WHAT WE ARE CURRENTLY IGNORING, on the same page rather than behind a
+          filter. A parked alert is still a true statement about the farm; the
+          only thing that changed is that somebody said they have it. Hiding the
+          list would turn parking into deletion with extra steps. */}
+      {parked.length > 0 ? (
+        <section className="mt-10 rounded-card border border-border-default bg-surface-sunken p-5">
+          <h2 className="text-[12px] font-semibold uppercase tracking-[0.16em] text-text-muted">
+            Parked · {parked.length}
+          </h2>
+          <p className="mt-1.5 text-[13.5px] text-text-secondary">
+            Still true. Somebody said they have it, so it is not on the list above until the
+            date they chose.
+          </p>
+          <ul className="mt-4 divide-y divide-border-default">
+            {parked.map(({ alert, park }) => (
+              <li key={alert.key} className="py-3 first:pt-2">
+                <Link
+                  href={alert.href}
+                  className="text-[14.5px] font-semibold text-text-secondary hover:text-brand-primary"
+                >
+                  {alert.headline}
+                </Link>
+                <p className="mt-0.5 text-[13px] text-text-muted">
+                  {parkSentence(park, now)}
+                </p>
+                {canPark(principal, alert.rule) ? <LiftForm parkId={park.id} /> : null}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {alerts.length > 0 || parked.length > 0 ? (
         <p className="mt-8 border-t border-border-default pt-4 text-[13px] text-text-muted">
           Nothing here is stored. Every line is worked out from the records when this page
           loads, so a condition you deal with stops appearing without anyone marking it done.

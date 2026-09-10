@@ -97,6 +97,7 @@ model Organisation {
   attendance      AttendanceEvent[]
   tasks           Task[]
   incidents       Incident[]
+  alertAcknowledgements AlertAcknowledgement[]
 }
 
 model Site {
@@ -350,6 +351,46 @@ model AnimalGroup {
   @@unique([siteId, code])
   @@index([siteId, closedAt])
   @@index([productionUnitId])
+}
+
+/// A DECISION SOMEBODY MADE, which is why it is stored when the alert itself is
+/// not. "I know about this, stop telling us until Thursday" is not a fact about
+/// the farm — it is a person taking responsibility for a condition, and the farm
+/// should be able to say afterwards who did that and why.
+///
+/// NEVER DELETED. Un-parking sets `liftedAt`, so the record of having silenced
+/// something survives the un-silencing. A row that vanished when somebody
+/// changed their mind would take the interesting part with it.
+model AlertAcknowledgement {
+  id             String @id @default(cuid())
+  organisationId String
+
+  /// The alert's derived key, `rule:subject` — see src/lib/alerts.ts. Stable
+  /// across recomputation, which is the whole reason an acknowledgement can bind
+  /// to something that is never stored.
+  alertKey       String
+  /// Denormalised from the key so the parked list can be grouped and audited
+  /// without parsing strings.
+  rule           String
+
+  /// Required. A parked alert with no reason is one somebody made disappear.
+  note           String
+  /// When it comes back. There is no "forever" — see MAX_PARK_DAYS.
+  until          DateTime
+
+  acknowledgedAt   DateTime @default(now())
+  acknowledgedById String
+
+  liftedAt   DateTime?
+  liftedById String?
+
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  acknowledgedBy User         @relation("AlertAcknowledgedBy", fields: [acknowledgedById], references: [id])
+  liftedBy       User?        @relation("AlertLiftedBy", fields: [liftedById], references: [id])
+
+  /// The lookup every alert page makes: "which of these keys are parked?"
+  @@index([organisationId, alertKey])
+  @@index([organisationId, until])
 }
 
 enum AnimalGroupEventType {
@@ -1317,6 +1358,8 @@ model User {
   ordersCancelled    PurchaseOrder[]    @relation("PurchaseOrderCancelledBy")
   attendance         AttendanceEvent[]  @relation("AttendanceSubject")
   attendanceRecorded AttendanceEvent[]  @relation("AttendanceRecorder")
+  alertsParked       AlertAcknowledgement[] @relation("AlertAcknowledgedBy")
+  alertsUnparked     AlertAcknowledgement[] @relation("AlertLiftedBy")
   tasksAssigned      Task[]             @relation("TaskAssignee")
   tasksCompleted     Task[]             @relation("TaskCompletedBy")
   tasksCreated       Task[]             @relation("TaskCreatedBy")
