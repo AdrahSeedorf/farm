@@ -420,6 +420,29 @@ export function thresholdBasisSentence(
   return 'Threshold is the farm-wide figure — this stage has none of its own. Set one in the production type settings.';
 }
 
+/**
+ * A threshold said in birds, not percent.
+ *
+ * THE MOST USEFUL SENTENCE ON THE SETTINGS SCREEN. "0.25%" is abstract, and a
+ * number nobody can picture is a number nobody notices is wrong — a vet handed
+ * a percentage box has no way to see that a stray zero has just set the alarm at
+ * fifty birds a day. "About 5 birds a day in a flock of 2,000" is checkable at a
+ * glance by anybody who has walked the house.
+ *
+ * Returns null with no flock to scale against, rather than inventing one.
+ */
+export function thresholdInBirds(pct: number, population: number): number | null {
+  if (population <= 0 || !Number.isFinite(pct) || pct <= 0) return null;
+  return Math.round((pct / 100) * population * 10) / 10;
+}
+
+export function thresholdInBirdsSentence(pct: number, population: number): string {
+  const birds = thresholdInBirds(pct, population);
+  if (birds === null) return 'No flock yet to measure this against.';
+  const rounded = birds < 1 ? birds : Math.round(birds);
+  return `About ${rounded} ${rounded === 1 ? 'bird' : 'birds'} a day in a flock of ${population.toLocaleString('en-GH')}.`;
+}
+
 export interface MortalityVerdict {
   level: AlertLevel;
   rule: 'mortality.high' | 'mortality.spike';

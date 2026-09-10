@@ -24,6 +24,8 @@ import {
   parkErrors,
   parkSentence,
   MAX_PARK_DAYS,
+  thresholdInBirds,
+  thresholdInBirdsSentence,
   type Alert,
 } from '@/lib/alerts';
 import type { Permission } from '@/lib/rbac';
@@ -673,6 +675,38 @@ describe('who may park', () => {
     const d = RULE_CATALOGUE['incident.unattended'];
     expect(worker.has(d.permission)).toBe(true);
     expect(worker.has(d.ackPermission)).toBe(false);
+  });
+});
+
+describe('a threshold said in birds', () => {
+  // THE ONE THING THAT MAKES THE SETTINGS SCREEN SAFE TO USE. 0.25 and 0.025
+  // look alike in a text box and mean five birds or half a bird; nobody catches
+  // that in percent, and everybody catches it in birds.
+  it('scales the percentage against the flock', () => {
+    expect(thresholdInBirds(0.25, 2000)).toBe(5);
+    expect(thresholdInBirds(0.1, 2000)).toBe(2);
+    expect(thresholdInBirds(0.7, 500)).toBe(3.5);
+  });
+
+  it('makes a stray zero obvious', () => {
+    expect(thresholdInBirdsSentence(0.25, 2000)).toContain('5 birds');
+    expect(thresholdInBirdsSentence(2.5, 2000)).toContain('50 birds');
+  });
+
+  it('does not invent a flock to scale against', () => {
+    expect(thresholdInBirds(0.25, 0)).toBeNull();
+    expect(thresholdInBirdsSentence(0.25, 0)).toMatch(/No flock yet/);
+  });
+
+  it('rejects a threshold that is not a positive number', () => {
+    expect(thresholdInBirds(0, 2000)).toBeNull();
+    expect(thresholdInBirds(-1, 2000)).toBeNull();
+    expect(thresholdInBirds(Number.NaN, 2000)).toBeNull();
+  });
+
+  it('keeps the singular readable', () => {
+    expect(thresholdInBirdsSentence(0.05, 2000)).toContain('1 bird');
+    expect(thresholdInBirdsSentence(0.05, 2000)).not.toContain('1 birds');
   });
 });
 

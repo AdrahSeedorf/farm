@@ -52,6 +52,9 @@ export type AuditAction =
   // the other acts that change what the farm can see.
   | 'alert.park'
   | 'alert.lift'
+  // Changing a threshold changes what the farm is told. A figure quietly raised
+  // in March is why nobody was warned in April, and this is how that is found.
+  | 'alertThreshold.update'
   | 'item.create'
   | 'item.update'
   | 'item.archive'

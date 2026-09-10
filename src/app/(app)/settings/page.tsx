@@ -180,6 +180,27 @@ export default async function SettingsPage() {
         </Link>
       </section>
 
+      {/* Reachable by anyone who can see health records, not only the owner —
+          the mortality figures on that page are a vet's to set, and the vet role
+          holds no settings permission at all. See the note on that page. */}
+      <section className="mt-6 rounded-card border border-border-default bg-surface-card p-6">
+        <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-brand-accent">
+          Alert thresholds
+        </h2>
+        <p className="mt-3 text-[14px] text-text-secondary">
+          How much death is ordinary at each stage of life, and when a house with nothing
+          written down becomes worth mentioning. The figures shipped with this system came
+          from published breed material and are a starting point for your vet to revise, not
+          advice from anyone qualified to give it.
+        </p>
+        <Link
+          href="/settings/alerts"
+          className="mt-4 inline-flex min-h-touch items-center rounded-control border border-border-strong bg-surface-card px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
+        >
+          Set the thresholds
+        </Link>
+      </section>
+
       {recentAudit.length > 0 ? (
         <section className="mt-6 rounded-card border border-border-default bg-surface-card p-6">
           <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-brand-accent">
