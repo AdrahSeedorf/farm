@@ -14,6 +14,7 @@ import {
 } from '@/lib/enquiries';
 import { formatGhanaPhone } from '@/lib/brand';
 import { ReadForm, AnswerForm, PutAsideForm } from './EnquiryForms';
+import { ConvertEnquiryForm } from '../customers/CustomerForms';
 
 export const metadata: Metadata = { title: 'Enquiries' };
 
@@ -41,9 +42,10 @@ export default async function EnquiriesPage({
   const includeArchived = archived === '1';
   const now = new Date();
 
-  const [enquiries, canAct] = await Promise.all([
+  const [enquiries, canAct, canAddBuyer] = await Promise.all([
     listEnquiries(principal, { includeArchived, asOf: now }),
     currentUserCan('customer:edit'),
+    currentUserCan('customer:create'),
   ]);
 
   const sorted = sortEnquiries(enquiries, now);
@@ -174,6 +176,13 @@ export default async function EnquiriesPage({
                   {state === 'NEW' ? <ReadForm enquiryId={enquiry.id} /> : null}
                   {state === 'NEW' || state === 'READ' ? (
                     <AnswerForm enquiryId={enquiry.id} />
+                  ) : null}
+                  {/* TURNING AN ENQUIRY INTO A BUYER IS OFFERED ONCE IT HAS
+                      BEEN ANSWERED, not before. Somebody nobody has spoken to
+                      is not yet a customer, and a buyers list padded with
+                      people who never replied is one nobody trusts. */}
+                  {state === 'ANSWERED' && canAddBuyer ? (
+                    <ConvertEnquiryForm enquiryId={enquiry.id} />
                   ) : null}
                   {state !== 'ARCHIVED' ? <PutAsideForm enquiryId={enquiry.id} /> : null}
                 </div>

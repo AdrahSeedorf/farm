@@ -117,6 +117,7 @@ model Organisation {
   incidents       Incident[]
   alertAcknowledgements AlertAcknowledgement[]
   enquiries       Enquiry[]
+  customers       Customer[]
 }
 
 model Site {
@@ -1377,6 +1378,8 @@ model User {
   ordersCancelled    PurchaseOrder[]    @relation("PurchaseOrderCancelledBy")
   attendance         AttendanceEvent[]  @relation("AttendanceSubject")
   attendanceRecorded AttendanceEvent[]  @relation("AttendanceRecorder")
+  customersCreated   Customer[]             @relation("CustomerCreatedBy")
+  customersArchived  Customer[]             @relation("CustomerArchivedBy")
   enquiriesRead      Enquiry[]              @relation("EnquiryReadBy")
   enquiriesResponded Enquiry[]              @relation("EnquiryRespondedBy")
   enquiriesArchived  Enquiry[]              @relation("EnquiryArchivedBy")
@@ -1515,6 +1518,7 @@ model Enquiry {
   archivedAt     DateTime?
   archivedById   String?
 
+  customer     Customer?
   organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   readBy       User?        @relation("EnquiryReadBy", fields: [readById], references: [id])
   respondedBy  User?        @relation("EnquiryRespondedBy", fields: [respondedById], references: [id])
@@ -1522,6 +1526,60 @@ model Enquiry {
 
   @@index([organisationId, createdAt])
   @@index([ipAddress, createdAt])
+}
+
+enum CustomerKind {
+  WHOLESALE
+  RETAIL
+}
+
+/// WHO THE FARM SELLS TO.
+///
+/// THE PHONE NUMBER IS THE IDENTITY, and it is deliberately NOT unique. Two
+/// businesses genuinely share a number — a shop and the owner's other shop, a
+/// husband and wife buying separately — and a unique constraint would send
+/// whoever is standing at the counter into inventing a digit to get past the
+/// form. The duplicate is warned about in the application and both rows are
+/// kept if the person says they are different buyers. See src/lib/customers.ts.
+///
+/// NEVER DELETED. A buyer who stopped buying is the history behind every figure
+/// in every report covering the period they were buying in.
+model Customer {
+  id             String       @id @default(cuid())
+  organisationId String
+  kind           CustomerKind @default(RETAIL)
+
+  /// Whatever the farm calls them. Not required to be a legal name.
+  name           String
+  /// E.164 where it could be normalised, as typed where it could not — a number
+  /// this system cannot parse is still a number a person can ring.
+  phone          String
+  businessName   String?
+  email          String?
+  /// Where they are, in the words somebody would use giving directions.
+  town           String?
+  notes          String?
+
+  /// The enquiry they came from, where they came from one. Kept so the farm can
+  /// see which of its buyers the website actually produced.
+  fromEnquiryId  String?      @unique
+
+  createdAt      DateTime  @default(now())
+  createdById    String?
+  updatedAt      DateTime  @updatedAt
+
+  archivedAt     DateTime?
+  archivedById   String?
+  archiveReason  String?
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("CustomerCreatedBy", fields: [createdById], references: [id])
+  archivedBy   User?        @relation("CustomerArchivedBy", fields: [archivedById], references: [id])
+  fromEnquiry  Enquiry?     @relation(fields: [fromEnquiryId], references: [id])
+
+  /// The lookup the duplicate check makes on every save.
+  @@index([organisationId, phone])
+  @@index([organisationId, archivedAt])
 }
 
 model LoginAttempt {
