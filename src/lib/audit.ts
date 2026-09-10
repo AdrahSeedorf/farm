@@ -55,6 +55,9 @@ export type AuditAction =
   // Changing a threshold changes what the farm is told. A figure quietly raised
   // in March is why nobody was warned in April, and this is how that is found.
   | 'alertThreshold.update'
+  | 'enquiry.read'
+  | 'enquiry.answer'
+  | 'enquiry.archive'
   | 'item.create'
   | 'item.update'
   | 'item.archive'

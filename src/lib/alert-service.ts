@@ -23,6 +23,17 @@ import { outstandingOrders } from '@/lib/order-service';
 import { listTasks } from '@/lib/task-service';
 import { listIncidents } from '@/lib/incident-service';
 import { shiftsBetween } from '@/lib/attendance-service';
+import { listEnquiries } from '@/lib/enquiry-service';
+// Both modules call this `daysWaiting`, and both are right in their own terms —
+// an unread incident and an unanswered enquiry are each waiting on somebody.
+// Aliased here rather than renamed there, because the clearer name belongs in
+// the module that owns the idea, not in whichever file happened to import both.
+import {
+  isUnanswered,
+  daysWaiting as enquiryDaysWaiting,
+  wantsSentence,
+  KIND_LABELS,
+} from '@/lib/enquiries';
 import { isOverdue, daysOverdue } from '@/lib/tasks';
 import { isUnattended, daysWaiting } from '@/lib/incidents';
 import { elapsedHours, STALE_OPEN_SHIFT_HOURS } from '@/lib/attendance';
@@ -471,6 +482,37 @@ async function attendanceAlerts(principal: Principal, asOf: Date): Promise<Alert
     );
 }
 
+/**
+ * Enquiries nobody has replied to.
+ *
+ * ORG-WIDE, WITH NO SITE. An enquiry arrives from a stranger on the internet who
+ * has no idea the farm has more than one gate, so there is nothing honest to
+ * scope it to. `siteId` stays null and the alert appears for everybody who holds
+ * `customer:view`, which on this farm is the people who would answer it.
+ */
+async function enquiryAlerts(principal: Principal, asOf: Date): Promise<Alert[]> {
+  const enquiries = await listEnquiries(principal, { asOf });
+
+  return enquiries
+    .filter((e) => isUnanswered(e, asOf))
+    .map((e) => {
+      const wants = wantsSentence(e);
+      return buildAlert('enquiry.unanswered', {
+        subject: e.id,
+        headline: `${e.name}${e.businessName ? ` · ${e.businessName}` : ''} has had no reply`,
+        detail: `${KIND_LABELS[e.kind]} enquiry, waiting ${enquiryDaysWaiting(e, asOf)} days.${
+          wants ? ` Wants ${wants}.` : ''
+        } ${e.phone}`,
+        href: '/enquiries',
+        since: e.createdAt,
+        // A WHOLESALE ENQUIRY OUTRANKS A GENERAL ONE. Not because the person
+        // matters more, but because a standing weekly order is the thing this
+        // farm is short of and the window to win one closes fastest.
+        level: e.kind === 'WHOLESALE' ? 'CRITICAL' : 'ATTENTION',
+      });
+    });
+}
+
 // ---------------------------------------------------------------------------
 // PUTTING IT TOGETHER
 // ---------------------------------------------------------------------------
@@ -492,6 +534,7 @@ const GATHERERS: { permission: Permission; gather: Gatherer }[] = [
   { permission: RULE_CATALOGUE['task.overdue'].permission, gather: taskAlerts },
   { permission: RULE_CATALOGUE['incident.unattended'].permission, gather: incidentAlerts },
   { permission: RULE_CATALOGUE['attendance.openShift'].permission, gather: attendanceAlerts },
+  { permission: RULE_CATALOGUE['enquiry.unanswered'].permission, gather: enquiryAlerts },
 ];
 
 /**

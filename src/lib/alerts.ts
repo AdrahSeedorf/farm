@@ -115,6 +115,7 @@ export const ALERT_RULES = [
   'task.overdue',
   'incident.unattended',
   'attendance.openShift',
+  'enquiry.unanswered',
 ] as const;
 export type AlertRule = (typeof ALERT_RULES)[number];
 
@@ -259,6 +260,14 @@ export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
     ackPermission: 'incident:edit',
     what: 'Somebody reported something and nobody has recorded looking at it.',
     why: 'The reporting rate is the only number this module has, and it collapses the first time a report is ignored.',
+  },
+  'enquiry.unanswered': {
+    label: 'Enquiry nobody has answered',
+    level: 'ATTENTION',
+    permission: 'customer:view',
+    ackPermission: 'customer:edit',
+    what: 'Somebody wrote in through the website and has had no reply.',
+    why: 'This is the farm’s only sales channel until the first egg. A buyer comparing suppliers wrote to three farms on Monday; the one replying on Wednesday is answering a decision already made.',
   },
   'attendance.openShift': {
     label: 'Still clocked in',
