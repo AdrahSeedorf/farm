@@ -80,7 +80,7 @@ export async function recordLoad(
     receivedBy: parsed.data.receivedBy,
     notes: parsed.data.notes,
     lines,
-  }, parsed.data.acknowledged);
+  }, { acknowledgedToken: parsed.data.acknowledged });
 
   if (result.status === 'needsConfirmation') {
     return { warnings: result.warnings, warningToken: result.token };

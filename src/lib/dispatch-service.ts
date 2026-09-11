@@ -351,12 +351,32 @@ export type DispatchResult =
   /** A hard refusal. `clearsOn` is set when it is a withdrawal period. */
   | { status: 'refused'; message: string; clearsOn: Date | null };
 
+export interface RecordDispatchOptions {
+  /** The fingerprint of the warnings the person read. See warnings.ts. */
+  acknowledgedToken?: string | null;
+  /**
+   * The caller has ALREADY shown these warnings and had them agreed.
+   *
+   * Exactly one caller sets this: the counter sale, which shows the same
+   * warnings on its own screen before it writes anything, because it creates the
+   * order and the load in one submit and a warning raised halfway through would
+   * leave a confirmed order for produce nobody received. Its acknowledgement
+   * covers the same figures this would compute.
+   *
+   * NOT A WAY TO SKIP CHECKS. Errors and the withdrawal gate still run; this
+   * only says "the person has seen the warnings", and any caller setting it is
+   * responsible for having actually shown them.
+   */
+  warningsAlreadyAgreed?: boolean;
+}
+
 export async function recordDispatch(
   principal: Principal,
   input: RecordDispatchInput,
-  acknowledgedToken: string | null = null,
+  options: RecordDispatchOptions = {},
   today: Date = new Date(),
 ): Promise<DispatchResult> {
+  const acknowledgedToken = options.acknowledgedToken ?? null;
   const context = await dispatchContext(principal, input.salesOrderId);
   if (!context) return refuse('That order no longer exists.');
   const { order } = context;
@@ -394,17 +414,19 @@ export async function recordDispatch(
 
   const lines = input.lines.filter((l) => l.quantity > 0);
 
-  const warnings = dispatchWarnings({
-    lines,
-    progress: context.progress,
-    stock: context.stock,
-    method: input.method,
-    receivedBy: input.receivedBy,
-  });
-  if (warnings.length > 0) {
-    const token = warningToken(warnings);
-    if (acknowledgedToken !== token) {
-      return { status: 'needsConfirmation', warnings, token };
+  if (!options.warningsAlreadyAgreed) {
+    const warnings = dispatchWarnings({
+      lines,
+      progress: context.progress,
+      stock: context.stock,
+      method: input.method,
+      receivedBy: input.receivedBy,
+    });
+    if (warnings.length > 0) {
+      const token = warningToken(warnings);
+      if (acknowledgedToken !== token) {
+        return { status: 'needsConfirmation', warnings, token };
+      }
     }
   }
   const routes = await stockRoutes(

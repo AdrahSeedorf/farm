@@ -76,6 +76,10 @@ export type AuditAction =
   // A dispatch is never edited or deleted — it is reversed, which is its own act.
   | 'dispatch.record'
   | 'dispatch.reverse'
+  // A gate sale writes an order AND a load in one submit. Recorded as its own
+  // action so "who sold at the gate today?" is one query rather than a join
+  // looking for orders that were dispatched the minute they were written.
+  | 'counterSale.sell'
   | 'item.create'
   | 'item.update'
   | 'item.archive'

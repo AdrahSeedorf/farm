@@ -36,6 +36,9 @@ const ITEMS: { href: string; label: string; permission: Permission | Permission[
   { href: '/inventory', label: 'Store', permission: 'inventory:view' },
   { href: '/purchases', label: 'Purchases', permission: 'procurement:view' },
   { href: '/suppliers', label: 'Suppliers', permission: 'supplier:view' },
+  // First of the selling group, because it is the one somebody opens with a
+  // customer standing in front of them.
+  { href: '/sell', label: 'Sell', permission: 'order:create' },
   { href: '/orders', label: 'Orders', permission: 'order:view' },
   { href: '/dispatch', label: 'Loads out', permission: 'delivery:view' },
   { href: '/pricing', label: 'Prices', permission: 'product:view' },

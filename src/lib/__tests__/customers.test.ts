@@ -27,6 +27,7 @@ function customer(over: Partial<Customer> = {}): Customer {
     town: over.town ?? null,
     notes: over.notes ?? null,
     fromEnquiryId: over.fromEnquiryId ?? null,
+    isCounterSale: over.isCounterSale ?? false,
     createdAt: over.createdAt ?? NOW,
     createdByName: over.createdByName ?? null,
     archivedAt: over.archivedAt ?? null,

@@ -1578,6 +1578,19 @@ model Customer {
   /// see which of its buyers the website actually produced.
   fromEnquiryId  String?      @unique
 
+  /// NOT A PERSON. The standing row cash sales at the gate are recorded against.
+  ///
+  /// A stranger buying one crate for cash will not leave a number, and the right
+  /// answer to that is not to refuse the sale — it is to record it somewhere
+  /// honest. Every such sale lands here, so counter takings add up to a figure
+  /// the farm can look at, and no screen ever suggests ringing it.
+  ///
+  /// The alternative was a nullable customer on every order, which would put a
+  /// "there may be no buyer" branch into every screen and query from now on, to
+  /// serve one case. One odd row beats a hundred branches. Exactly one of these
+  /// exists per organisation; the service finds it or creates it.
+  isCounterSale  Boolean   @default(false)
+
   createdAt      DateTime  @default(now())
   createdById    String?
   updatedAt      DateTime  @updatedAt

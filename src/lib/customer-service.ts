@@ -48,6 +48,7 @@ type DbCustomer = {
   town: string | null;
   notes: string | null;
   fromEnquiryId: string | null;
+  isCounterSale: boolean;
   createdAt: Date;
   archivedAt: Date | null;
   archiveReason: string | null;
@@ -66,6 +67,7 @@ function toCustomer(row: DbCustomer): Customer {
     town: row.town,
     notes: row.notes,
     fromEnquiryId: row.fromEnquiryId,
+    isCounterSale: row.isCounterSale,
     createdAt: row.createdAt,
     createdByName: row.createdBy?.name ?? null,
     archivedAt: row.archivedAt,

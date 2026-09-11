@@ -55,6 +55,13 @@ export interface Customer {
   notes: string | null;
   /** The enquiry this customer came from, if they came from one. */
   fromEnquiryId: string | null;
+  /**
+   * NOT A PERSON — the standing row gate cash sales are recorded against.
+   *
+   * Carried on the type so every screen that offers to ring somebody can decline
+   * to offer it here, rather than rendering a Call button over an empty number.
+   */
+  isCounterSale: boolean;
   createdAt: Date;
   createdByName: string | null;
   archivedAt: Date | null;

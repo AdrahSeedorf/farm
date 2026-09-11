@@ -77,9 +77,23 @@ export default async function CustomerPage({
         </div>
       ) : null}
 
-      {/* REACHING THEM IS THE FIRST THING ON THE PAGE. Whoever opened this record
-          is almost always about to ring or message them, and on a phone that
-          should be one tap rather than a number to copy out. */}
+      {/* THE STANDING COUNTER ROW IS NOT A PERSON, and must never be offered a
+          Call button over an empty number. It is here at all so cash takings at
+          the gate add up somewhere the farm can look at. */}
+      {customer.isCounterSale ? (
+        <section className="mt-7 rounded-card border border-border-strong bg-surface-sunken p-6">
+          <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-text-muted">
+            Not a person
+          </h2>
+          <p className="mt-3 text-[15px] text-text-primary">
+            Cash sales at the gate to buyers who did not leave a number are recorded here, so
+            they add up somewhere honest. There is nobody to ring.
+          </p>
+        </section>
+      ) : (
+      /* REACHING THEM IS THE FIRST THING ON THE PAGE. Whoever opened this record
+         is almost always about to ring or message them, and on a phone that
+         should be one tap rather than a number to copy out. */
       <section className="mt-7 rounded-card border border-border-default bg-surface-card p-6">
         <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-brand-accent">
           Reach them
@@ -110,6 +124,7 @@ export default async function CustomerPage({
           ) : null}
         </div>
       </section>
+      )}
 
       {customer.notes ? (
         <section className="mt-6 rounded-card border border-border-default bg-surface-card p-6">

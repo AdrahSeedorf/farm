@@ -122,7 +122,10 @@ export default async function CustomersPage({
               </span>
             </div>
             <p className="mt-0.5 text-[14px] text-text-secondary">
-              {formatGhanaPhone(customer.phone)}
+              {/* The standing counter row has no number and is not a person. */}
+              {customer.isCounterSale
+                ? 'Cash sales at the gate · nobody to ring'
+                : formatGhanaPhone(customer.phone)}
               {customer.town ? ` · ${customer.town}` : ''}
             </p>
           </li>
