@@ -28,6 +28,7 @@ const ITEMS: { href: string; label: string; permission: Permission | Permission[
     permission: ALERT_RULES.map((r) => RULE_CATALOGUE[r].permission),
   },
   { href: '/dashboard', label: 'Dashboard', permission: 'report:view' },
+  { href: '/reports', label: 'Report', permission: 'report:view' },
   { href: '/flocks', label: 'Flocks', permission: 'flock:view' },
   // Labelled from the species profile below, not from this string. See productionLabel().
   { href: '/production', label: 'Production', permission: 'production:view' },

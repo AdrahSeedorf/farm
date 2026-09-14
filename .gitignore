@@ -47,6 +47,13 @@ src/generated/
 .env
 .env.local
 .env*.local
+.e2e-fixture.mts
 
-# Scratch — safe to remove
+# Delivered task archives, and the folder they are parked in.
+#
+# This session cannot delete files inside a connected folder, so each task
+# tarball is moved here after it is extracted rather than removed. They are
+# build artefacts, not source: they belong on disk until somebody clears them
+# out, and never in the repository.
 _to_delete/
+*.tgz
