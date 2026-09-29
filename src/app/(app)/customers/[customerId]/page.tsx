@@ -5,7 +5,10 @@ import { pageGuard, currentUserCan } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
 import { customerById } from '@/lib/customer-service';
 import { listOrders } from '@/lib/sales-service';
-import { sortOrders, committedSentence, STATE_LABELS } from '@/lib/sales';
+import { sortOrders, STATE_LABELS } from '@/lib/sales';
+import { balanceFor } from '@/lib/payment-service';
+import { balanceSentence, isInDebt } from '@/lib/payments';
+import { ReceivePaymentForm } from '../../payments/PaymentForms';
 import { formatGHS } from '@/lib/money';
 import { displayName, isArchived, KIND_LABELS } from '@/lib/customers';
 import { formatGhanaPhone, telLink } from '@/lib/brand';
@@ -24,16 +27,22 @@ export default async function CustomerPage({
   if (!allowed) return <Forbidden area="buyers" roles={principal.roles} />;
 
   const { customerId } = await params;
-  const [customer, canEdit, canSeeOrders] = await Promise.all([
+  const [customer, canEdit, canSeeOrders, canSeeMoney, canReceive] = await Promise.all([
     customerById(principal, customerId),
     currentUserCan('customer:edit'),
     currentUserCan('order:view'),
+    currentUserCan('payment:view'),
+    currentUserCan('payment:create'),
   ]);
   if (!customer) notFound();
 
   const orders = canSeeOrders
     ? sortOrders(await listOrders(principal, { customerId }))
     : [];
+
+  // The balance is worked out from the rows every time. There is no stored
+  // figure on Customer and there must never be one — see payment-service.ts.
+  const money = canSeeMoney ? await balanceFor(principal, customerId) : null;
 
   const archived = isArchived(customer);
 
@@ -147,10 +156,52 @@ export default async function CustomerPage({
         </p>
       ) : null}
 
-      {/* WHAT WAS AGREED, AND NOT CALLED A BALANCE. A balance is what is owed,
-          and that needs payments, which are not recorded anywhere yet. Putting
-          the word "balance" on this figure would put a number on a screen that
-          a farm would chase somebody for. */}
+      {/* WHAT THEY OWE. This used to say "agreed, not owed" because payments did
+          not exist; now they do, and the figure is a real balance — confirmed
+          orders less what has come in, derived from the rows each time. */}
+      {money ? (
+        <section
+          className={`mt-8 rounded-card border p-6 ${
+            isInDebt(money.balance)
+              ? 'border-status-attention bg-status-attention-bg'
+              : 'border-border-default bg-surface-card'
+          }`}
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h2
+              className={`text-[12px] font-semibold uppercase tracking-[0.14em] ${
+                isInDebt(money.balance) ? 'text-status-attention' : 'text-brand-accent'
+              }`}
+            >
+              The account
+            </h2>
+            <Link href="/payments" className="text-[14px] font-semibold text-brand-primary">
+              All money in
+            </Link>
+          </div>
+          <p
+            className={`mt-2 text-[15px] font-medium ${
+              isInDebt(money.balance) ? 'text-status-attention' : 'text-text-primary'
+            }`}
+          >
+            {balanceSentence(money.balance)}
+          </p>
+
+          {canReceive ? (
+            <div className="mt-5 border-t border-border-default pt-5">
+              <h3 className="text-[15px] font-semibold text-text-primary">Record a payment</h3>
+              <div className="mt-3">
+                <ReceivePaymentForm
+                  customers={[]}
+                  today={day(new Date())}
+                  fixedCustomerId={customerId}
+                />
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       {canSeeOrders ? (
         <section className="mt-8 rounded-card border border-border-default bg-surface-card p-6">
           <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -161,8 +212,6 @@ export default async function CustomerPage({
               Take an order
             </Link>
           </div>
-
-          <p className="mt-3 text-[15px] text-text-primary">{committedSentence(orders)}</p>
 
           {orders.length > 0 ? (
             <ul className="mt-4 divide-y divide-border-default">

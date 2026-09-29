@@ -42,6 +42,7 @@ const ITEMS: { href: string; label: string; permission: Permission | Permission[
   { href: '/sell', label: 'Sell', permission: 'order:create' },
   { href: '/orders', label: 'Orders', permission: 'order:view' },
   { href: '/dispatch', label: 'Loads out', permission: 'delivery:view' },
+  { href: '/payments', label: 'Money in', permission: 'payment:view' },
   { href: '/pricing', label: 'Prices', permission: 'product:view' },
   { href: '/customers', label: 'Buyers', permission: 'customer:view' },
   { href: '/enquiries', label: 'Enquiries', permission: 'customer:view' },

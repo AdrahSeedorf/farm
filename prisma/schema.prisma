@@ -122,6 +122,7 @@ model Organisation {
   productPrices   ProductPrice[]
   salesOrders     SalesOrder[]
   dispatches      Dispatch[]
+  payments        Payment[]
 }
 
 model Site {
@@ -1391,6 +1392,8 @@ model User {
   salesOrdersCancelled SalesOrder[]         @relation("SalesOrderCancelledBy")
   dispatchesRecorded   Dispatch[]           @relation("DispatchRecordedBy")
   dispatchesReversed   Dispatch[]           @relation("DispatchReversedBy")
+  paymentsRecorded     Payment[]            @relation("PaymentRecordedBy")
+  paymentsReversed     Payment[]            @relation("PaymentReversedBy")
   pricesSet          ProductPrice[]         @relation("PriceSetBy")
   customersCreated   Customer[]             @relation("CustomerCreatedBy")
   customersArchived  Customer[]             @relation("CustomerArchivedBy")
@@ -1601,6 +1604,7 @@ model Customer {
 
   prices       ProductPrice[]
   salesOrders  SalesOrder[]
+  payments     Payment[]
   organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   createdBy    User?        @relation("CustomerCreatedBy", fields: [createdById], references: [id])
   archivedBy   User?        @relation("CustomerArchivedBy", fields: [archivedById], references: [id])
@@ -1892,6 +1896,69 @@ model DispatchLine {
   @@index([dispatchId])
   @@index([salesOrderLineId])
   @@index([productId])
+}
+
+enum PaymentMethod {
+  CASH
+  MOMO
+  CARD
+  BANK
+}
+
+/// MONEY ARRIVING. The other half of a sale.
+///
+/// AGAINST A BUYER, NOT AGAINST AN ORDER. A cold store hands over GHS 500 that
+/// covers part of Tuesday's order and all of Thursday's, or pays ahead of an
+/// order nobody has written yet. Money arrives against a person; deciding which
+/// invoice it settles is a separate act of bookkeeping, and a system that forces
+/// that decision at the moment of receipt teaches people to invent an allocation
+/// to get the form to submit.
+///
+/// So a balance is `confirmed orders − payments received`, per buyer. It does
+/// not claim to know which order is paid, because nobody told it.
+///
+/// APPEND-ONLY. A payment entered wrongly is reversed with a reason — two rows
+/// and an explanation, never one row that quietly changed. Same rule as a load.
+///
+/// NO PROVIDER IS INVOLVED IN ANY OF THESE. Cash is counted by hand; MoMo to a
+/// merchant number arrives as an alert on somebody's phone and is typed in with
+/// its transaction ID. A card gateway, if the farm ever needs one, writes rows
+/// into this same table rather than anywhere new.
+model Payment {
+  id             String @id @default(cuid())
+  organisationId String
+  customerId     String
+
+  /// PAY-2026-0007 — the number on the receipt the buyer is handed.
+  reference      String
+  /// INTEGER PESEWAS. Always positive: a refund is a reversal, not a negative row.
+  amountPesewas  Int
+  method         PaymentMethod
+
+  receivedOn     DateTime @db.Date
+  /// Who physically took it. The only trace a cash payment leaves anywhere.
+  receivedBy     String?
+  /// The MoMo transaction ID, bank reference or gateway reference. Null on cash,
+  /// where there is nothing to record; warned about on everything else, because
+  /// without it this row cannot be matched against a statement later.
+  externalRef    String?
+  notes          String?
+
+  recordedById   String?
+  createdAt      DateTime @default(now())
+
+  reversedAt     DateTime?
+  reversedById   String?
+  reversalReason String?
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  customer     Customer     @relation(fields: [customerId], references: [id])
+  recordedBy   User?        @relation("PaymentRecordedBy", fields: [recordedById], references: [id])
+  reversedBy   User?        @relation("PaymentReversedBy", fields: [reversedById], references: [id])
+
+  @@unique([organisationId, reference])
+  @@index([customerId, receivedOn])
+  @@index([organisationId, receivedOn])
 }
 
 model LoginAttempt {

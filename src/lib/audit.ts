@@ -80,6 +80,10 @@ export type AuditAction =
   // action so "who sold at the gate today?" is one query rather than a join
   // looking for orders that were dispatched the minute they were written.
   | 'counterSale.sell'
+  // Money is never edited or deleted — a wrong payment is reversed, which is its
+  // own act and carries its own reason.
+  | 'payment.record'
+  | 'payment.reverse'
   | 'item.create'
   | 'item.update'
   | 'item.archive'
