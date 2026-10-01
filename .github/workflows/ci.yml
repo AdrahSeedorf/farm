@@ -14,6 +14,30 @@ jobs:
     name: Typecheck · Lint · Test · Build
     runs-on: ubuntu-latest
 
+    # The build statically generates the public pages, and those pages read the
+    # database to decide what the site may claim — whether the farm is being
+    # built, waiting for first lay, or selling. So `npm run build` genuinely
+    # needs Postgres, and has failed here on every run since those pages
+    # existed. A migrated but EMPTY database is enough: with no flocks the site
+    # correctly renders its "being built" state, which is also worth proving.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: adrah
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/adrah
+      DIRECT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/adrah
+
     steps:
       - uses: actions/checkout@v4
 
@@ -29,6 +53,12 @@ jobs:
       # gitignored and regenerated here before anything that depends on its types.
       - name: Generate Prisma client
         run: npx prisma generate
+
+      # `deploy`, not `dev`: it applies the committed migrations and nothing
+      # else. If a migration is missing or broken, this is where CI says so
+      # rather than the build failing later for a reason that looks unrelated.
+      - name: Apply migrations
+        run: npx prisma migrate deploy
 
       - name: Typecheck
         run: npm run typecheck
@@ -47,6 +77,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        # The guard below diffs against origin/main, which does not exist in the
+        # shallow clone checkout makes by default — the step would fail on the
+        # first pull request with "unknown revision" rather than on a real
+        # problem. Full history costs seconds on a repository this size.
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
