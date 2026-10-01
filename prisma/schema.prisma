@@ -123,6 +123,7 @@ model Organisation {
   salesOrders     SalesOrder[]
   dispatches      Dispatch[]
   payments        Payment[]
+  stockTakes      StockTake[]
 }
 
 model Site {
@@ -960,6 +961,7 @@ model Item {
   productionGrade ProductionGrade?
   cleaningRecords CleaningRecord[]
   purchaseOrderLines PurchaseOrderLine[]
+  stockTakeLines  StockTakeLine[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1008,6 +1010,7 @@ model StockLocation {
 
   site      Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
   movements StockMovement[]
+  stockTakes StockTake[]
 
   @@unique([siteId, code])
 }
@@ -1065,6 +1068,114 @@ model StockMovement {
   /// order line. Indexed because "how much of this order has actually arrived?"
   /// is a query over exactly this pair, run on every order screen.
   @@index([sourceType, sourceId])
+}
+
+/// SOMEBODY STOOD IN THE STORE AND COUNTED.
+///
+/// Every other stock figure in this system is derived from the movement ledger,
+/// and that is correct. But a ledger is only as honest as the recording that
+/// feeds it, so until a person physically counts, every figure on every screen
+/// is the records agreeing with the records — which is precisely what the period
+/// report says about itself. This row is the thing that fixes that.
+///
+/// WHY THE COUNT IS STORED AND NOT JUST THE ADJUSTMENT.
+///   The adjustment is already in `StockMovement`, signed, where every other
+///   stock fact lives. This table does not duplicate it — it records the ACT that
+///   justified it: who counted, when, what they saw, and what the records claimed
+///   at that moment. An adjustment with nothing behind it cannot answer "who
+///   counted, and what did they actually see?", which is the first question asked
+///   the day stock goes missing.
+///
+/// A COUNT THAT FINDS NOTHING IS STILL WORTH A ROW. Nothing is written to the
+/// ledger — there is nothing to correct — but "when was this last counted?" is a
+/// question most farms cannot answer, and a clean count is the answer to it.
+///
+/// NOT REVERSIBLE, AND DELIBERATELY SO. A dispatch can be reversed because it
+/// may never have happened; a count did happen. If the number typed was wrong,
+/// the fix is to count again — the next take compares against the corrected
+/// ledger and writes its own adjustment, with `miscount_earlier` as its reason.
+/// Both counts stay. Letting somebody erase a count would make the one record
+/// that exists to catch a problem the easiest record to make a problem disappear
+/// from.
+model StockTake {
+  id              String @id @default(cuid())
+  organisationId  String
+  /// Counted PER STORE. A take covers one building, because one person walks
+  /// one building — and a figure spanning two stores could not be acted on
+  /// without knowing which shelf it came from.
+  stockLocationId String
+
+  /// ST-2026-0007 — written at the top of the sheet somebody counts onto.
+  reference       String
+
+  countedOn       DateTime @db.Date
+  countedById     String
+
+  /// What was going on: "monthly count", "after the power cut", "handover".
+  notes           String?
+
+  createdAt       DateTime @default(now())
+
+  organisation  Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  stockLocation StockLocation @relation(fields: [stockLocationId], references: [id])
+  countedBy     User          @relation("StockTakeCountedBy", fields: [countedById], references: [id])
+  lines         StockTakeLine[]
+
+  @@unique([organisationId, reference])
+  @@index([stockLocationId, countedOn])
+  @@index([organisationId, countedOn])
+}
+
+/// One thing counted on one shelf.
+///
+/// PARTIAL COUNTS ARE NORMAL. A take holds lines only for what was actually
+/// counted; an item with no line here was not looked at, which is a different
+/// and much weaker statement than "it was counted and came to zero". A farm that
+/// had to count everything in order to count anything would count nothing.
+model StockTakeLine {
+  id          String @id @default(cuid())
+  stockTakeId String
+  itemId      String
+
+  /// What was on the shelf, in the item's BASE unit.
+  countedBase  Float
+  /// What the ledger said AT THE MOMENT OF COUNTING, in the base unit.
+  ///
+  /// SNAPSHOTTED, NEVER RECOMPUTED. A receipt entered next week but dated last
+  /// week changes what the same sum returns, and then the variance this line
+  /// recorded would no longer be the variance anybody found. What the records
+  /// claimed while a person stood there holding a tray is a fact about that
+  /// moment, and it is stored as one. This is the single exception to deriving
+  /// stock figures, and it is an exception because it is history, not a balance.
+  expectedBase Float
+  /// counted − expected. Negative is short, positive is over.
+  ///
+  /// STORED although it is `countedBase - expectedBase`, because both of its
+  /// inputs are themselves frozen history. Recomputing it would produce the same
+  /// number forever; storing it lets the database answer "what went missing last
+  /// quarter and why" without reading every line into memory first.
+  varianceBase Float
+
+  /// A key from VARIANCE_CAUSES. Null only on a line that agreed — there is
+  /// nothing to explain. Every line that is out has one, and "Nobody knows" is
+  /// a real and valid answer.
+  cause        String?
+  note         String?
+
+  /// The ADJUSTMENT movement this line wrote, where it wrote one.
+  ///
+  /// Null on a line that agreed. Also null on the unbatched remainder of a
+  /// shortage that spanned several batches — a count short across three batches
+  /// is three movements, and this column holds the first of them while the
+  /// `sourceType`/`sourceId` pair on the movements holds all of them. The
+  /// movements are the authority; this is a convenience for the screen.
+  movementId   String?
+
+  stockTake StockTake @relation(fields: [stockTakeId], references: [id], onDelete: Cascade)
+  item      Item      @relation(fields: [itemId], references: [id])
+
+  @@unique([stockTakeId, itemId])
+  @@index([itemId])
 }
 
 /// A breed, and the growth curve its breeder publishes for it.
@@ -1405,6 +1516,7 @@ model User {
   tasksAssigned      Task[]             @relation("TaskAssignee")
   tasksCompleted     Task[]             @relation("TaskCompletedBy")
   tasksCreated       Task[]             @relation("TaskCreatedBy")
+  stockTakesCounted  StockTake[]        @relation("StockTakeCountedBy")
   incidentsReported  Incident[]         @relation("IncidentReporter")
   incidentsReviewed  Incident[]         @relation("IncidentReviewer")
   incidentsClosed    Incident[]         @relation("IncidentCloser")

@@ -69,6 +69,12 @@ export default async function InventoryPage({
               Stores
             </Link>
           ) : null}
+          <Link
+            href="/inventory/counts"
+            className="inline-flex min-h-touch items-center rounded-control border border-border-strong px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
+          >
+            Counts
+          </Link>
           {canCreate ? (
             <Link
               href="/inventory/new"

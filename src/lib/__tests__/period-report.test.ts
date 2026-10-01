@@ -167,12 +167,34 @@ describe('the reconciliation — the point of the report', () => {
    * THE HONEST LIMIT. A farm reading "the collections and the store agree" as
    * "the eggs are all there" would be reading something this system cannot know.
    */
+  const ASOF = new Date('2026-10-01T00:00:00Z');
+
   it('AND THE REPORT SAYS WHAT IT CANNOT TELL ANYBODY', () => {
-    const note = stockTakeNote();
-    expect(note).toMatch(/nobody has counted the store/i);
+    const note = stockTakeNote(null, ASOF);
     expect(note).toMatch(/records agreeing with the records/i);
-    expect(note).toMatch(/stock take/i);
-    expect(note).toMatch(/not built yet/i);
+    expect(note).toMatch(/nobody has counted a store yet/i);
+  });
+
+  it('still says the figures are only records once a count exists', () => {
+    // The note must never upgrade to "verified" just because somebody counted
+    // once. A count fixes the ledger on one day; it does not make the ledger
+    // self-checking from then on.
+    const note = stockTakeNote(new Date('2026-09-29T00:00:00Z'), ASOF);
+    expect(note).toMatch(/records agreeing with the records/i);
+    expect(note).toMatch(/last counted 2 days ago/i);
+  });
+
+  it('says today and yesterday in words', () => {
+    expect(stockTakeNote(ASOF, ASOF)).toMatch(/last counted today/i);
+    expect(stockTakeNote(new Date('2026-09-30T00:00:00Z'), ASOF)).toMatch(
+      /last counted yesterday/i,
+    );
+  });
+
+  it('warns rather than reassures once a count is stale', () => {
+    const note = stockTakeNote(new Date('2026-06-01T00:00:00Z'), ASOF);
+    expect(note).toMatch(/says little about what is there now/i);
+    expect(note).toMatch(/2026-06-01/);
   });
 });
 

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import { Suspense } from 'react';
 import { pageGuard, currentUserCan } from '@/lib/session';
 import { Forbidden } from '@/components/ui/Forbidden';
@@ -18,6 +19,7 @@ import {
   BASIS,
   type PeriodKey,
 } from '@/lib/period-report';
+import { lastCountedByLocation } from '@/lib/stock-take-service';
 import { formatGHS } from '@/lib/money';
 import { PeriodPicker } from './PeriodPicker';
 
@@ -59,11 +61,19 @@ export default async function ReportsPage({
   const today = new Date();
   const period = periodFor(key, today, valid ? custom : undefined);
 
-  const [figures, canSeeMoney, stores] = await Promise.all([
+  const [figures, canSeeMoney, stores, counts] = await Promise.all([
     figuresFor(principal, period),
     currentUserCan('price:view'),
     produceStoreNames(principal),
+    lastCountedByLocation(principal),
   ]);
+
+  // The most recent count across any store this person can see. The note below
+  // speaks about whether the shelf has EVER been checked, not about one building.
+  const lastCounted = counts
+    .map((c) => c.lastCountedOn)
+    .filter((d): d is Date => d !== null)
+    .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
 
   const derived = derive(figures, daysIn(period));
   const check = reconcile(figures);
@@ -141,7 +151,10 @@ export default async function ReportsPage({
 
             {/* WHAT THIS CANNOT TELL ANYBODY, said every time. */}
             <p className="mt-4 border-t border-border-default pt-3 text-[13px] text-text-muted">
-              {stockTakeNote()}
+              {stockTakeNote(lastCounted, today)}{' '}
+              <Link href="/inventory/counts" className="font-semibold text-brand-primary">
+                Stock counts
+              </Link>
             </p>
             {stores.length === 0 ? (
               <p className="mt-3 text-[13px] text-text-muted">

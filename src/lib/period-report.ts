@@ -26,9 +26,9 @@ import { round, henDayProductionPct, saleableRatePct, averageBirdsAlive } from '
  *   while no store was flagged to receive produce, a grade unlinked from its item
  *   halfway through a week, a correction applied to one and not the other.
  *
- *   WHAT THIS STILL CANNOT CHECK is the shelf. Nobody has counted the store, so
- *   every figure here is the records agreeing with the records. A stock take is
- *   what compares them to reality, and it is not built — see `stockTakeNote`.
+ *   WHAT THIS STILL CANNOT CHECK is the shelf. Every figure here is the records
+ *   agreeing with the records. Only a stock count compares them to reality, and
+ *   `stockTakeNote` says on the screen whether one has happened and when.
  *   Saying so is the difference between a report and a reassurance.
  *
  * EVERY FIGURE SAYS WHERE IT CAME FROM. A number on a report with no stated
@@ -298,16 +298,47 @@ export function reconcile(figures: PeriodFigures): Reconciliation {
 }
 
 /**
- * WHAT THIS REPORT CANNOT TELL ANYBODY.
+ * WHAT THIS REPORT CAN AND CANNOT TELL ANYBODY.
  *
- * Said on the screen, every time. Every figure above is the records agreeing
- * with the records: nobody has counted the store. A farm reading "the
- * collections and the store agree" as "the eggs are all there" would be reading
- * something this system has no way of knowing — and the difference is the whole
- * point of writing it down.
+ * Said on the screen, every time, and the wording now turns on a fact rather
+ * than on an apology: has anybody actually counted the store, and how long ago?
+ *
+ * EVERY FIGURE ABOVE IS STILL THE RECORDS AGREEING WITH THE RECORDS. A stock
+ * take is the only thing that compares them to a shelf, and its value decays —
+ * a count from February says almost nothing about April. So the note reports
+ * the date and lets the reader judge, instead of either claiming the figures
+ * are verified or claiming nothing can be known.
+ *
+ * `days` is deliberately a parameter rather than read in here: this module is
+ * pure, and a function that quietly asked the clock would give a different
+ * answer in a test than on a screen.
  */
-export function stockTakeNote(): string {
-  return 'Nobody has counted the store. Everything above is the records agreeing with the records — it cannot tell you whether the eggs are actually on the shelf. Counting the store and comparing it to this figure is a stock take, and it is not built yet.';
+export function stockTakeNote(lastCountedOn: Date | null, asOf: Date): string {
+  const base =
+    'Everything above is the records agreeing with the records — it cannot by itself tell you whether the eggs are actually on the shelf. Only a stock count can.';
+
+  if (!lastCountedOn) {
+    return `${base} Nobody has counted a store yet.`;
+  }
+
+  const days = Math.max(
+    0,
+    Math.round((startOfDayUTC(asOf) - startOfDayUTC(lastCountedOn)) / 86_400_000),
+  );
+  const when =
+    days === 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+
+  if (days > 45) {
+    return `${base} The last count was ${when}, on ${lastCountedOn
+      .toISOString()
+      .slice(0, 10)} — long enough that it says little about what is there now.`;
+  }
+
+  return `${base} A store was last counted ${when}, and the ledger was corrected to match what was found.`;
+}
+
+function startOfDayUTC(d: Date): number {
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
 // ---------------------------------------------------------------------------

@@ -91,6 +91,10 @@ export type AuditAction =
   | 'stockLocation.produce'
   | 'stock.receipt'
   | 'stock.writeOff'
+  // Somebody counted a store and the ledger was corrected to match. There is no
+  // `stockTake.update` or `stockTake.delete`: a count happened, and the only way
+  // to change what the ledger says afterwards is to count again.
+  | 'stockTake.record'
   | 'healthProgramme.create'
   | 'healthProgramme.update'
   | 'healthProgramme.import'
