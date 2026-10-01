@@ -1,11 +1,15 @@
 import 'server-only';
 import { db } from '@/lib/db';
 import type { Principal } from '@/lib/rbac';
+import type { HealthEventType } from '@/generated/prisma/enums';
 import { orgFilter, siteFilter } from '@/lib/scope';
 import {
   activeWithdrawals,
+  unstatedWithdrawals,
   clearFor,
+  WITHDRAWABLE_EVENT_TYPES,
   type ActiveWithdrawal,
+  type UnstatedWithdrawal,
 } from '@/lib/health-schedule';
 
 /**
@@ -44,8 +48,18 @@ export interface FlockWithdrawal {
   flockCode: string;
   houseName: string | null;
   withdrawals: ActiveWithdrawal[];
+  /**
+   * Treatments nobody recorded a withdrawal period for.
+   *
+   * These restrict with NO clearing date. See `unstatedWithdrawals` — silence is
+   * not the same as a label saying none applies, and this system used to treat
+   * it as if it were.
+   */
+  unstated: UnstatedWithdrawal[];
   eggsClearOn: Date | null;
   meatClearsOn: Date | null;
+  /** True while anything about this flock's produce is unknown rather than dated. */
+  eggsUnknown: boolean;
 }
 
 /**
@@ -67,12 +81,20 @@ export async function withdrawalsAcrossFlocks(
       id: true,
       code: true,
       productionUnit: { select: { name: true } },
+      /**
+       * EVERY EVENT THAT COULD CARRY A PERIOD, not only those that do.
+       *
+       * This used to filter to rows where a withdrawal was recorded, which meant
+       * a treatment with nothing recorded was never even read — the gap was
+       * invisible at the database level before it was invisible in the
+       * arithmetic. The set is a few dozen rows per flock; reading all of them
+       * and deciding in code is both cheap and testable.
+       */
       healthEvents: {
-        where: {
-          OR: [{ eggWithdrawalDays: { not: null } }, { meatWithdrawalDays: { not: null } }],
-        },
+        where: { type: { in: WITHDRAWABLE_EVENT_TYPES as string[] as HealthEventType[] } },
         select: {
           name: true,
+          type: true,
           occurredOn: true,
           eggWithdrawalDays: true,
           meatWithdrawalDays: true,
@@ -83,21 +105,30 @@ export async function withdrawalsAcrossFlocks(
 
   return flocks
     .map((flock) => {
-      const withdrawals = activeWithdrawals(flock.healthEvents, asOf);
+      const sources = flock.healthEvents.map((e) => ({ ...e, eventType: e.type as string }));
+      const withdrawals = activeWithdrawals(sources, asOf);
+      const unstated = unstatedWithdrawals(sources, asOf);
       return {
         flockId: flock.id,
         flockCode: flock.code,
         houseName: flock.productionUnit?.name ?? null,
         withdrawals,
+        unstated,
         eggsClearOn: clearFor(withdrawals, 'EGGS'),
         meatClearsOn: clearFor(withdrawals, 'MEAT'),
+        eggsUnknown: unstated.some((u) => u.kind === 'EGGS'),
       };
     })
-    .filter((f) => f.withdrawals.length > 0)
+    .filter((f) => f.withdrawals.length > 0 || f.unstated.length > 0)
     .sort((a, b) => {
-      const aLatest = Math.max(...a.withdrawals.map((w) => w.clearsOn.getTime()));
-      const bLatest = Math.max(...b.withdrawals.map((w) => w.clearsOn.getTime()));
-      return bLatest - aLatest;
+      // An unknown sorts above any dated restriction: it is the one that needs
+      // somebody to go and read a label, and it does not clear on its own.
+      if (a.eggsUnknown !== b.eggsUnknown) return a.eggsUnknown ? -1 : 1;
+      const latest = (f: { withdrawals: ActiveWithdrawal[] }) =>
+        f.withdrawals.length === 0
+          ? 0
+          : Math.max(...f.withdrawals.map((w) => w.clearsOn.getTime()));
+      return latest(b) - latest(a);
     });
 }
 
@@ -113,12 +144,13 @@ export async function flockWithdrawals(
       id: true,
       code: true,
       productionUnit: { select: { name: true } },
+      // Same set as withdrawalsAcrossFlocks, for the same reason: a treatment
+      // with no period recorded is exactly the row that must not be filtered out.
       healthEvents: {
-        where: {
-          OR: [{ eggWithdrawalDays: { not: null } }, { meatWithdrawalDays: { not: null } }],
-        },
+        where: { type: { in: WITHDRAWABLE_EVENT_TYPES as string[] as HealthEventType[] } },
         select: {
           name: true,
+          type: true,
           occurredOn: true,
           eggWithdrawalDays: true,
           meatWithdrawalDays: true,
@@ -128,14 +160,18 @@ export async function flockWithdrawals(
   });
   if (!flock) return null;
 
-  const withdrawals = activeWithdrawals(flock.healthEvents, asOf);
+  const sources = flock.healthEvents.map((e) => ({ ...e, eventType: e.type as string }));
+  const withdrawals = activeWithdrawals(sources, asOf);
+  const unstated = unstatedWithdrawals(sources, asOf);
   return {
     flockId: flock.id,
     flockCode: flock.code,
     houseName: flock.productionUnit?.name ?? null,
     withdrawals,
+    unstated,
     eggsClearOn: clearFor(withdrawals, 'EGGS'),
     meatClearsOn: clearFor(withdrawals, 'MEAT'),
+    eggsUnknown: unstated.some((u) => u.kind === 'EGGS'),
   };
 }
 

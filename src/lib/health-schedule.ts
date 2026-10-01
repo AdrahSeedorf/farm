@@ -155,9 +155,38 @@ export function scheduleSentence(entry: ScheduledEntry): string {
 export interface WithdrawalSource {
   name: string;
   occurredOn: Date;
+  /**
+   * Days, AS STATED ON THE LABEL — and the three states matter.
+   *
+   *   a number  the label says this many days
+   *   0         the label says none applies, and somebody read it
+   *   null      NOBODY HAS SAID
+   *
+   * The third is not the second. See `unstatedWithdrawals` below.
+   */
   eggWithdrawalDays: number | null;
   meatWithdrawalDays: number | null;
+  /**
+   * What kind of event this was. Only things that put a substance into a bird
+   * can carry a withdrawal period — a vet visit or a post-mortem cannot, and
+   * demanding a figure for those would train people to type zero into
+   * everything, which is how a real withdrawal eventually gets a zero too.
+   */
+  eventType?: string;
 }
+
+/**
+ * Event types that can carry a withdrawal period, and must therefore state one.
+ *
+ * Conservative on purpose: a SUPPLEMENT usually has none, but "usually" is not a
+ * claim this system is entitled to make on a label's behalf.
+ */
+export const WITHDRAWABLE_EVENT_TYPES: readonly string[] = [
+  'VACCINATION',
+  'MEDICATION',
+  'SUPPLEMENT',
+  'TREATMENT',
+];
 
 export interface ActiveWithdrawal {
   name: string;
@@ -168,6 +197,31 @@ export interface ActiveWithdrawal {
   /** The first day selling may resume. */
   clearsOn: Date;
   daysRemaining: number;
+}
+
+/**
+ * A treatment nobody recorded a withdrawal period for.
+ *
+ * THIS USED TO RESTRICT NOTHING, which was the most dangerous line of code in
+ * the system. A null withdrawal was skipped, so a flock treated with an unknown
+ * product was treated as clear and its eggs could be sold the same morning —
+ * while the schema comment above the column correctly said that null "is not the
+ * same as none applying". The code and the comment disagreed, and the code won.
+ *
+ * Now an unstated period restricts INDEFINITELY. There is no clearing date
+ * because there is no information: the only thing that lifts it is somebody
+ * reading the label and recording what it says — including recording a zero when
+ * the label says none applies, which is a statement rather than a silence.
+ *
+ * This is the one place in the whole system that is not warn-never-block. The
+ * farm makes a promise about this publicly, and an unknown that quietly resolves
+ * to "safe" is the opposite of a promise.
+ */
+export interface UnstatedWithdrawal {
+  name: string;
+  kind: 'EGGS' | 'MEAT';
+  treatedOn: Date;
+  daysSince: number;
 }
 
 /**
@@ -200,6 +254,43 @@ export function withdrawalClearsOn(occurredOn: Date, withdrawalDays: number | nu
  * clears. Taking the maximum is the only safe reading, and it is why this
  * returns every active restriction rather than a single date.
  */
+export function unstatedWithdrawals(
+  sources: WithdrawalSource[],
+  asOf: Date,
+): UnstatedWithdrawal[] {
+  const unstated: UnstatedWithdrawal[] = [];
+
+  for (const s of sources) {
+    // An event type that cannot carry a withdrawal is not a silence worth
+    // acting on. Where the caller does not say, assume it can — the safe
+    // reading of a missing field is the restrictive one.
+    if (s.eventType !== undefined && !WITHDRAWABLE_EVENT_TYPES.includes(s.eventType)) {
+      continue;
+    }
+    for (const [kind, days] of [
+      ['EGGS', s.eggWithdrawalDays],
+      ['MEAT', s.meatWithdrawalDays],
+    ] as const) {
+      if (days !== null) continue;
+      unstated.push({
+        name: s.name,
+        kind,
+        treatedOn: s.occurredOn,
+        daysSince: daysBetween(s.occurredOn, asOf),
+      });
+    }
+  }
+
+  return unstated.sort((a, b) => b.treatedOn.getTime() - a.treatedOn.getTime());
+}
+
+/** What to do about it, in the words of the person who has to do it. */
+export function unstatedSentence(unstated: UnstatedWithdrawal[]): string {
+  if (unstated.length === 0) return '';
+  const names = [...new Set(unstated.map((u) => u.name))].join(', ');
+  return `Nobody recorded whether ${names} has a withdrawal period. Until somebody reads the label and records it — including recording none, where the label says none applies — nothing from this house can be sold.`;
+}
+
 export function activeWithdrawals(
   sources: WithdrawalSource[],
   asOf: Date,

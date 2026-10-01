@@ -306,3 +306,60 @@ describe('what a buyer has been committed to', () => {
     expect(STATE_LABELS.CONFIRMED).toMatch(/buyer/);
   });
 });
+
+describe('a house whose withdrawal period nobody recorded', () => {
+  const unknown = { flockId: 'f1', name: 'House A', clearsOn: null };
+  const dated = {
+    flockId: 'f2',
+    name: 'House B',
+    clearsOn: new Date('2026-10-08T00:00:00.000Z'),
+  };
+
+  /**
+   * THE HOLE THIS CLOSES: an unrecorded withdrawal restricted nothing, so a
+   * treated house's eggs were sellable the same morning.
+   */
+  it('IS REFUSED, AND SAYS THERE IS NO DATE TO WAIT FOR', () => {
+    const verdict = withdrawalGate({
+      restricted: [unknown],
+      drawnFromFlockId: 'f1',
+      hasProduceLines: true,
+    });
+    expect(verdict.kind).toBe('REFUSED');
+    expect(verdict.kind === 'REFUSED' && verdict.message).toMatch(/nobody recorded whether/i);
+    expect(verdict.kind === 'REFUSED' && verdict.message).toMatch(/no date to wait for/i);
+  });
+
+  /** Waiting fixes a dated period. It does not fix this one, so the two read differently. */
+  it('reads differently from a dated period', () => {
+    const datedVerdict = withdrawalGate({
+      restricted: [dated],
+      drawnFromFlockId: 'f2',
+      hasProduceLines: true,
+    });
+    expect(datedVerdict.kind === 'REFUSED' && datedVerdict.message).toMatch(/until 2026-10-08/);
+    expect(datedVerdict.kind === 'REFUSED' && datedVerdict.message).not.toMatch(/no date/i);
+  });
+
+  it('still demands a house be named while anything is unknown', () => {
+    const verdict = withdrawalGate({
+      restricted: [unknown],
+      drawnFromFlockId: null,
+      hasProduceLines: true,
+    });
+    expect(verdict.kind).toBe('NEEDS_SOURCE');
+    expect(verdict.kind === 'NEEDS_SOURCE' && verdict.message).toMatch(
+      /no withdrawal period recorded/i,
+    );
+  });
+
+  it('and naming a different, clear house still lets the sale through', () => {
+    expect(
+      withdrawalGate({
+        restricted: [unknown],
+        drawnFromFlockId: 'f9',
+        hasProduceLines: true,
+      }).kind,
+    ).toBe('CLEAR');
+  });
+});

@@ -7,6 +7,8 @@ import { withdrawalsAcrossFlocks } from '@/lib/withdrawal-service';
 import { StatusBadge } from './StatusBadge';
 import { StatusChip } from './ScheduleList';
 import { scheduleSentence } from '@/lib/health-schedule';
+import { StartDraftButton } from './StartDraftButton';
+import { draftProgramme } from '@/lib/health-service';
 
 export const metadata: Metadata = { title: 'Health' };
 
@@ -14,11 +16,12 @@ export default async function HealthPage() {
   const { principal, allowed } = await pageGuard('health:view');
   if (!allowed) return <Forbidden area="health records" roles={principal.roles} />;
 
-  const [programmes, due, restricted, canCreate] = await Promise.all([
+  const [programmes, due, restricted, canCreate, draft] = await Promise.all([
     listProgrammes(principal),
     dueAcrossFlocks(principal),
     withdrawalsAcrossFlocks(principal),
     currentUserCan('health:create'),
+    draftProgramme(principal),
   ]);
 
   const overdue = due.filter((d) => d.entry.status === 'OVERDUE');
@@ -42,6 +45,58 @@ export default async function HealthPage() {
         ) : null}
       </div>
 
+      {/* THE FARM HAS NO VET PROGRAMME YET, and that is the single biggest gap in
+          its health records. This says so, and offers the one useful thing the
+          software can do about it: produce the questions, not the answers. */}
+      {canCreate && !draft ? (
+        <section className="mt-6 rounded-card border border-border-strong bg-surface-sunken p-5 sm:p-6">
+          <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-text-muted">
+            No approved programme yet
+          </h2>
+          <p className="mt-2 text-[15px] text-text-primary">
+            This system will not write a vaccination schedule. The hatchery has already vaccinated
+            your chicks, Gumboro timing depends on the parent flock, Newcastle pressure is local to
+            Adansi South, and withdrawal periods end up in a customer’s food — none of which it can
+            know.
+          </p>
+          <p className="mt-2 text-[14px] text-text-secondary">
+            What it can do is write down the questions. Starting a draft gives you the diseases a
+            layer flock here is normally protected against, with every age marked unconfirmed and
+            every withdrawal period blank, plus a sheet to print and take to your chick supplier
+            and the District Veterinary Officer.
+          </p>
+          <div className="mt-4">
+            <StartDraftButton />
+          </div>
+        </section>
+      ) : null}
+
+      {draft ? (
+        <section className="mt-6 rounded-card border border-border-strong bg-surface-sunken p-5 sm:p-6">
+          <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-text-muted">
+            A draft is waiting on a vet
+          </h2>
+          <p className="mt-2 text-[14px] text-text-secondary">
+            {draft.items.length} entries, none of them confirmed and none carrying a withdrawal
+            period. Until they do, produce from any house treated under this draft cannot be sold.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link
+              href={`/health/${draft.id}/questions`}
+              className="inline-flex min-h-touch items-center rounded-control bg-brand-primary px-5 text-[15px] font-semibold text-text-inverse hover:bg-brand-primary-hover"
+            >
+              Print the questions
+            </Link>
+            <Link
+              href={`/health/${draft.id}`}
+              className="inline-flex min-h-touch items-center rounded-control border border-border-strong bg-surface-card px-5 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
+            >
+              Open the draft
+            </Link>
+          </div>
+        </section>
+      ) : null}
+
       {restricted.length > 0 ? (
         <section
           role="alert"
@@ -59,14 +114,26 @@ export default async function HealthPage() {
                 >
                   {f.houseName ?? f.flockCode}
                 </Link>{' '}
-                — {f.eggsClearOn ? `eggs until ${f.eggsClearOn.toISOString().slice(0, 10)}` : ''}
-                {f.eggsClearOn && f.meatClearsOn ? ', ' : ''}
-                {f.meatClearsOn ? `meat until ${f.meatClearsOn.toISOString().slice(0, 10)}` : ''}
+                {/* AN UNKNOWN IS NOT A DATE. Before the unstated-withdrawal rule
+                    this line could render "— eggs until " with nothing after it,
+                    because a null clearing date read as no restriction at all. */}
+                {f.eggsUnknown
+                  ? '— treated with no withdrawal period recorded. Nothing can be sold from it until somebody reads the label.'
+                  : null}
+                {!f.eggsUnknown && f.eggsClearOn
+                  ? `— eggs until ${f.eggsClearOn.toISOString().slice(0, 10)}`
+                  : null}
+                {!f.eggsUnknown && f.eggsClearOn && f.meatClearsOn ? ', ' : ''}
+                {!f.eggsUnknown && f.meatClearsOn
+                  ? `meat until ${f.meatClearsOn.toISOString().slice(0, 10)}`
+                  : null}
               </li>
             ))}
           </ul>
           <p className="mt-3 border-t border-status-critical/30 pt-2.5 text-[13px] text-status-critical">
-            Nothing from these flocks may be sold until the dates above.
+            Nothing from these flocks may be sold until the dates above. Where no date is given,
+            there is none to wait for — a label has to be read and recorded, and a withdrawal of
+            zero days is a valid thing to record.
           </p>
         </section>
       ) : null}

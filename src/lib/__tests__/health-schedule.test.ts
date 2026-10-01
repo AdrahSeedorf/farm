@@ -5,12 +5,15 @@ import {
   scheduleSentence,
   withdrawalClearsOn,
   activeWithdrawals,
+  unstatedWithdrawals,
+  unstatedSentence,
   clearFor,
   requiredQuantity,
   daysBetween,
   addDays,
   type ProgrammeItem,
   type CompletedEvent,
+  type WithdrawalSource,
 } from '../health-schedule';
 
 const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
@@ -316,5 +319,84 @@ describe('a whole flock’s week, end to end', () => {
   it('shows nothing at all once the flock is closed', () => {
     const closed = scheduleFor(programme, hatch, given, d('2026-08-26'), { closed: true });
     expect(needsAttention(closed)).toEqual([]);
+  });
+});
+
+describe('a withdrawal period nobody recorded', () => {
+  const treated = new Date('2026-09-20T00:00:00.000Z');
+  const today = new Date('2026-09-29T00:00:00.000Z');
+
+  const source = (over: Partial<WithdrawalSource> = {}): WithdrawalSource => ({
+    name: over.name ?? 'Oxytetracycline',
+    occurredOn: over.occurredOn ?? treated,
+    eggWithdrawalDays: over.eggWithdrawalDays === undefined ? null : over.eggWithdrawalDays,
+    meatWithdrawalDays: over.meatWithdrawalDays === undefined ? null : over.meatWithdrawalDays,
+    eventType: over.eventType ?? 'TREATMENT',
+  });
+
+  /**
+   * THE BUG THIS REPLACED: a null withdrawal was skipped entirely, so a flock
+   * treated with an unknown product read as clear and its eggs were sellable
+   * the same morning.
+   */
+  it('RESTRICTS, where it used to restrict nothing', () => {
+    expect(activeWithdrawals([source()], today)).toEqual([]);
+    const unstated = unstatedWithdrawals([source()], today);
+    expect(unstated).toHaveLength(2); // eggs and meat
+    expect(unstated[0].daysSince).toBe(9);
+  });
+
+  /** There is no clearing date, because there is no information. */
+  it('has no clearing date — only a label lifts it', () => {
+    const sentence = unstatedSentence(unstatedWithdrawals([source()], today));
+    expect(sentence).toMatch(/nobody recorded whether oxytetracycline/i);
+    expect(sentence).toMatch(/nothing from this house can be sold/i);
+    expect(sentence).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+
+  /**
+   * ZERO IS A STATEMENT, SILENCE IS NOT. Somebody read the label and it said
+   * none applies — that is information, and it clears.
+   */
+  it('A RECORDED ZERO CLEARS IT; A BLANK DOES NOT', () => {
+    const stated = source({ eggWithdrawalDays: 0, meatWithdrawalDays: 0 });
+    expect(unstatedWithdrawals([stated], today)).toEqual([]);
+    expect(activeWithdrawals([stated], today)).toEqual([]);
+  });
+
+  it('and a real period is reported the ordinary way', () => {
+    const stated = source({ eggWithdrawalDays: 14, meatWithdrawalDays: 0 });
+    expect(unstatedWithdrawals([stated], today)).toEqual([]);
+    expect(activeWithdrawals([stated], today)).toHaveLength(1);
+  });
+
+  it('reports each product only once per kind, newest first', () => {
+    const older = source({ name: 'A', occurredOn: new Date('2026-09-10T00:00:00.000Z') });
+    const newer = source({ name: 'B', occurredOn: treated });
+    expect(unstatedWithdrawals([older, newer], today).map((u) => u.name)).toEqual([
+      'B',
+      'B',
+      'A',
+      'A',
+    ]);
+  });
+
+  /**
+   * Demanding a figure for a vet visit would train people to type zero into
+   * everything — and then a real withdrawal gets a zero too.
+   */
+  it('IGNORES EVENTS THAT CANNOT CARRY A WITHDRAWAL AT ALL', () => {
+    expect(unstatedWithdrawals([source({ eventType: 'VET_VISIT' })], today)).toEqual([]);
+    expect(unstatedWithdrawals([source({ eventType: 'POST_MORTEM' })], today)).toEqual([]);
+    expect(unstatedWithdrawals([source({ eventType: 'VACCINATION' })], today)).toHaveLength(2);
+  });
+
+  /** The safe reading of a missing field is the restrictive one. */
+  it('treats an unknown event type as one that could carry a period', () => {
+    expect(unstatedWithdrawals([source({ eventType: undefined })], today)).toHaveLength(2);
+  });
+
+  it('says nothing when there is nothing to say', () => {
+    expect(unstatedSentence([])).toBe('');
   });
 });

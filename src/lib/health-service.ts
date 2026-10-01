@@ -5,6 +5,12 @@ import { orgFilter, siteFilter } from '@/lib/scope';
 import type { ParsedProgrammeItem } from '@/lib/health-programme';
 import { scheduleFor, needsAttention, type ScheduledEntry } from '@/lib/health-schedule';
 import { ageInDays } from '@/lib/metrics';
+import {
+  DRAFT_PROGRAMME_NAME,
+  DRAFT_SOURCE_NOTE,
+  DRAFT_ITEMS,
+  draftItemNote,
+} from '@/lib/draft-programme';
 
 /**
  * Health programme service — ADRAH Farms
@@ -337,4 +343,93 @@ export async function dueAcrossFlocks(
 
   // Most overdue first, across every flock — the farm has one pair of hands.
   return due.sort((a, b) => b.entry.daysFromDue - a.entry.daysFromDue);
+}
+
+/**
+ * Start a draft programme to take to a vet.
+ *
+ * COMPOSED FROM THE IMPORT PATH, not written straight to the tables. A draft
+ * created here is an ordinary programme in every respect — it can be edited,
+ * re-imported over, assigned to a flock and approved by a named person, because
+ * it goes through exactly the machinery a vet's emailed schedule goes through.
+ * A second, special kind of programme would be a second set of rules to keep in
+ * step.
+ *
+ * EVERY WITHDRAWAL PERIOD IS LEFT NULL, deliberately. Null now means UNKNOWN and
+ * restricts selling (see health-schedule.ts), so a flock treated under this
+ * draft cannot have its eggs sold until somebody reads a label and records what
+ * it says. The blanks are the safety feature, not a gap in it.
+ *
+ * Refuses to make a second one: two drafts called the same thing, one of them
+ * half-answered, is how a farm ends up following the wrong sheet.
+ */
+export async function startDraftProgramme(
+  principal: Principal,
+  options: { speciesProfileId?: string | null; productionTypeProfileId?: string | null } = {},
+): Promise<{ id: string; created: boolean }> {
+  const existing = await db.healthProgramme.findFirst({
+    where: { ...orgFilter(principal), name: DRAFT_PROGRAMME_NAME, isActive: true },
+    select: { id: true },
+  });
+  if (existing) return { id: existing.id, created: false };
+
+  const programme = await db.healthProgramme.create({
+    data: {
+      organisationId: principal.organisationId,
+      speciesProfileId: options.speciesProfileId ?? null,
+      productionTypeProfileId: options.productionTypeProfileId ?? null,
+      name: DRAFT_PROGRAMME_NAME,
+      description: DRAFT_SOURCE_NOTE,
+      // Recorded as what it is. `sourceName` normally carries the vet or guide
+      // the schedule came from; saying "nobody" here is more useful than blank,
+      // which reads as an oversight.
+      sourceName: 'Nobody — unverified draft',
+      sourceRole: 'Not a veterinary source',
+      status: 'DRAFT',
+    },
+    select: { id: true },
+  });
+
+  const rows: ParsedProgrammeItem[] = DRAFT_ITEMS.map((item, i) => ({
+    ageDays: item.ageDays,
+    name: item.name,
+    eventType: item.eventType,
+    route: null,
+    dosePerBird: null,
+    // THE LOCK. See the note above.
+    eggWithdrawalDays: null,
+    meatWithdrawalDays: null,
+    windowDays: 7,
+    notes: draftItemNote(item),
+    sortOrder: i,
+  }));
+
+  await importProgrammeItems(principal, programme.id, rows, 'replace');
+  return { id: programme.id, created: true };
+}
+
+/** The draft, if one has been started. */
+export async function draftProgramme(principal: Principal) {
+  return db.healthProgramme.findFirst({
+    where: { ...orgFilter(principal), name: DRAFT_PROGRAMME_NAME, isActive: true },
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      items: {
+        orderBy: [{ sortOrder: 'asc' }, { ageDays: 'asc' }],
+        select: {
+          id: true,
+          name: true,
+          ageDays: true,
+          eventType: true,
+          route: true,
+          dosePerBird: true,
+          eggWithdrawalDays: true,
+          meatWithdrawalDays: true,
+          notes: true,
+        },
+      },
+    },
+  });
 }

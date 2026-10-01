@@ -7,7 +7,11 @@ import { requirePermission } from '@/lib/session';
 import { recordAudit } from '@/lib/audit';
 import { canAccessSite, orgFilter } from '@/lib/scope';
 import { parseProgrammeTable, type ParsedProgrammeItem } from '@/lib/health-programme';
-import { importProgrammeItems, touchProgramme } from '@/lib/health-service';
+import {
+  importProgrammeItems,
+  touchProgramme,
+  startDraftProgramme,
+} from '@/lib/health-service';
 import { recordHealthEvent } from '@/lib/health-event-service';
 import {
   programmeSchema,
@@ -432,4 +436,38 @@ export async function recordEvent(
   revalidatePath('/health');
   revalidatePath('/dashboard');
   redirect(`/flocks/${flockId}/health?recorded=1`);
+}
+
+/**
+ * Start the draft programme.
+ *
+ * `health:create`, not `health:approve` — starting a list of questions is not
+ * approving a schedule, and the person who takes the sheet to the vet is
+ * usually not the person who will sign it off.
+ */
+export async function startDraft(): Promise<void> {
+  const principal = await requirePermission('health:create');
+
+  const species = await db.speciesProfile.findFirst({
+    where: { ...orgFilter(principal), isActive: true },
+    select: { id: true, productionTypes: { select: { id: true }, take: 1 } },
+  });
+
+  const result = await startDraftProgramme(principal, {
+    speciesProfileId: species?.id ?? null,
+    productionTypeProfileId: species?.productionTypes[0]?.id ?? null,
+  });
+
+  if (result.created) {
+    await recordAudit({
+      principal,
+      action: 'healthProgramme.create',
+      entityType: 'HealthProgramme',
+      entityId: result.id,
+      after: { source: 'unverified draft' },
+    });
+  }
+
+  revalidatePath('/health');
+  redirect(`/health/${result.id}`);
 }

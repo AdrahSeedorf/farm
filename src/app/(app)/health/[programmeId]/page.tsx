@@ -69,7 +69,17 @@ export default async function ProgrammePage({
 
       <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-2">
         <h1 className="text-2xl font-bold text-text-primary">{programme.name}</h1>
-        <StatusBadge status={programme.status} />
+
+      {/* The sheet is the point of a draft, so it is reachable from the draft
+          rather than only from the list it was started on. */}
+      <p className="mt-1">
+        <Link
+          href={`/health/${programme.id}/questions`}
+          className="text-[14px] font-semibold text-brand-primary hover:underline"
+        >
+          Print the questions for the vet →
+        </Link>
+      </p>        <StatusBadge status={programme.status} />
       </div>
       {programme.description ? (
         <p className="mt-1 text-[15px] text-text-secondary">{programme.description}</p>

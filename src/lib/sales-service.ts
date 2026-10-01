@@ -298,13 +298,18 @@ export async function restrictedFlocks(
   asOf: Date = new Date(),
 ): Promise<RestrictedFlock[]> {
   const rows = await withdrawalsAcrossFlocks(principal, asOf);
-  return rows
-    .filter((f) => f.eggsClearOn !== null)
-    .map((f) => ({
-      flockId: f.flockId,
-      name: f.houseName ?? f.flockCode,
-      clearsOn: f.eggsClearOn as Date,
-    }));
+  return (
+    rows
+      // A dated egg withdrawal OR an unknown one. The second was missing, which
+      // meant a flock treated with an unrecorded product was sellable.
+      .filter((f) => f.eggsClearOn !== null || f.eggsUnknown)
+      .map((f) => ({
+        flockId: f.flockId,
+        name: f.houseName ?? f.flockCode,
+        // Null here means unknown, never "clear". See RestrictedFlock.
+        clearsOn: f.eggsUnknown ? null : (f.eggsClearOn as Date),
+      }))
+  );
 }
 
 /** The gate, answered without throwing, so a screen can warn before somebody tries. */

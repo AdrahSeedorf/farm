@@ -164,7 +164,16 @@ export function sequenceOf(orderNumber: string, year: number): number {
 export interface RestrictedFlock {
   flockId: string;
   name: string;
-  clearsOn: Date;
+  /**
+   * When the produce clears — or NULL when nobody knows.
+   *
+   * Null is not "no restriction". It means a treatment was recorded with no
+   * withdrawal period against it, so there is no date to wait for and nothing
+   * clears on its own: somebody has to read the label. See
+   * `unstatedWithdrawals` in health-schedule.ts for why silence must not resolve
+   * to safe.
+   */
+  clearsOn: Date | null;
 }
 
 export type WithdrawalVerdict =
@@ -204,21 +213,30 @@ export function withdrawalGate(input: {
 
   const blocked = input.restricted.find((r) => r.flockId === input.drawnFromFlockId);
   if (blocked) {
+    // AN UNKNOWN READS DIFFERENTLY FROM A DATE, because what the person has to
+    // do about it is different: waiting will not fix this one.
     return {
       kind: 'REFUSED',
-      message: `${blocked.name} is inside a withdrawal period until ${blocked.clearsOn
-        .toISOString()
-        .slice(0, 10)}. Produce from that house cannot be sold, and this order says it comes from there.`,
+      message: blocked.clearsOn
+        ? `${blocked.name} is inside a withdrawal period until ${blocked.clearsOn
+            .toISOString()
+            .slice(0, 10)}. Produce from that house cannot be sold, and this order says it comes from there.`
+        : `${blocked.name} was treated and nobody recorded whether there is a withdrawal period. Until somebody reads the label and records it — including recording none, where the label says none applies — produce from that house cannot be sold. There is no date to wait for.`,
     };
   }
 
   if (!input.drawnFromFlockId) {
     const names = input.restricted.map((r) => r.name).join(', ');
+    const anyUnknown = input.restricted.some((r) => r.clearsOn === null);
     return {
       kind: 'NEEDS_SOURCE',
       message: `${names} ${
         input.restricted.length === 1 ? 'is' : 'are'
-      } inside a withdrawal period, so this order cannot be confirmed until somebody says which house the produce comes from. Eggs are pooled in the store — the software cannot tell, and will not guess.`,
+      } ${
+        anyUnknown
+          ? 'restricted — treated with no withdrawal period recorded'
+          : 'inside a withdrawal period'
+      }, so this order cannot be confirmed until somebody says which house the produce comes from. Eggs are pooled in the store — the software cannot tell, and will not guess.`,
       restricted: input.restricted,
     };
   }
