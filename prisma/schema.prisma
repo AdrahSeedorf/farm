@@ -124,6 +124,7 @@ model Organisation {
   dispatches      Dispatch[]
   payments        Payment[]
   stockTakes      StockTake[]
+  lightingProgrammes LightingProgramme[]
 }
 
 model Site {
@@ -257,6 +258,7 @@ model ProductionTypeProfile {
   healthProgrammes HealthProgramme[]
   breeds         Breed[]
   productionGrades ProductionGrade[]
+  lightingProgrammes LightingProgramme[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2071,6 +2073,105 @@ model Payment {
   @@unique([organisationId, reference])
   @@index([customerId, receivedOn])
   @@index([organisationId, receivedOn])
+}
+
+/// WHEN THE LIGHTS ARE ON, AND FOR HOW LONG.
+///
+/// Daylength is the signal that brings a layer into production and holds her
+/// there. It is the one environmental lever on this farm that changes what the
+/// animals DO rather than what can be observed about them — and it is operated
+/// by a person flipping a switch at a particular hour, which means it is
+/// operated wrongly unless the hour is written down somewhere everybody reads.
+///
+/// NOT NAMED FOR POULTRY, and not only out of tidiness. Photoperiod control is
+/// used on laying hens, on breeding pigs, on dairy herds and on fish ponds. The
+/// steps below are ages and hours; what those hours mean to the animal belongs
+/// to the production type, which is data.
+///
+/// NOT A LEDGER. A programme is a PLAN, so its steps are edited in place rather
+/// than corrected by appending — unlike every event table in this system. The
+/// audit log records who changed a step and when, which is the same treatment an
+/// alert threshold gets, and for the same reason: changing the plan changes what
+/// the farm is told to do, and that should be traceable without pretending a
+/// plan is a historical record.
+model LightingProgramme {
+  id             String @id @default(cuid())
+  organisationId String
+
+  /// Optional narrowing, so a farm running more than one kind of animal keeps
+  /// its programmes apart. Null means it applies to anything.
+  productionTypeProfileId String?
+
+  name        String
+  description String?
+
+  /// Where the extra hours go relative to the natural day: MORNING, EVENING or
+  /// SPLIT. Stored as text rather than an enum because it is an operating
+  /// preference that may grow a fourth option, and a migration to add one to an
+  /// enum is a poor trade for a field nothing joins on.
+  supplementMode String @default("MORNING")
+
+  /// WHERE THE NUMBERS CAME FROM, in plain words.
+  ///
+  /// The programme this system ships is a reasonable starting point drawn from
+  /// general layer practice for the latitude and the breed. It is not a
+  /// breeder's recommendation and must never be displayed as one, so the note
+  /// travels with the programme rather than living in a comment somebody can
+  /// read once and forget.
+  sourceNote String?
+
+  /// True while nothing better than the shipped starting point has been put in
+  /// its place. Shown on every screen the programme appears on.
+  isDraft  Boolean @default(true)
+  /// The programme a flock of this production type follows when nothing else
+  /// says otherwise. At most one per production type, enforced in the service.
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organisation   Organisation           @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  productionType ProductionTypeProfile? @relation(fields: [productionTypeProfileId], references: [id])
+  steps          LightingStep[]
+
+  @@unique([organisationId, name])
+  @@index([organisationId, isActive])
+}
+
+/// One instruction: from this age, give this many hours of light.
+///
+/// AGE IN DAYS, not weeks. A group has an age in days, and converting at the
+/// edges is exactly how an off-by-seven creeps into a schedule. The screens say
+/// weeks because that is how people talk about it.
+///
+/// A STEP IS A CHANGE, NOT A VALUE FOR EVERY DAY. The instruction in force is
+/// the latest one the animals have reached, which is why there is no row for
+/// each day of a seventy-week cycle.
+model LightingStep {
+  id          String @id @default(cuid())
+  programmeId String
+
+  ageDays    Int
+  /// Total hours of light per day — natural and artificial together, never just
+  /// the lamp hours. What the lamps must supply depends on where the farm is and
+  /// what day it is, and is worked out rather than stored.
+  totalHours Float
+
+  /// Target light level at animal height, in lux.
+  ///
+  /// NULLABLE, WITH NO DEFAULT SHIPPED. Lux depends on the lamp, its height, the
+  /// dust on it and the colour of the walls, none of which this software knows.
+  /// A blank reports that nobody has measured — which is the true state of most
+  /// farms — and that is more useful than a confident figure nobody checked.
+  lux        Int?
+
+  note String?
+
+  programme LightingProgramme @relation(fields: [programmeId], references: [id], onDelete: Cascade)
+
+  @@unique([programmeId, ageDays])
+  @@index([programmeId, ageDays])
 }
 
 model LoginAttempt {

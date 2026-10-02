@@ -95,6 +95,15 @@ export type AuditAction =
   // `stockTake.update` or `stockTake.delete`: a count happened, and the only way
   // to change what the ledger says afterwards is to count again.
   | 'stockTake.record'
+  // Changing a lighting programme changes what the farm is told to do with the
+  // one lever that decides whether birds lay. Audited for the same reason an
+  // alert threshold is: a figure quietly altered in March is why production fell
+  // in April, and this is how that is found.
+  | 'lighting.start'
+  | 'lighting.step.save'
+  | 'lighting.step.remove'
+  | 'lighting.mode'
+  | 'lighting.default'
   | 'healthProgramme.create'
   | 'healthProgramme.update'
   | 'healthProgramme.import'

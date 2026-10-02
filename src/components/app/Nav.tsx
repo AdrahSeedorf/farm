@@ -33,6 +33,11 @@ const ITEMS: { href: string; label: string; permission: Permission | Permission[
   // Labelled from the species profile below, not from this string. See productionLabel().
   { href: '/production', label: 'Production', permission: 'production:view' },
   { href: '/health', label: 'Health', permission: 'health:view' },
+  // Next to Flocks and Health rather than under either. Daylength is husbandry,
+  // not medicine, and the person who needs the switch-on time is the one walking
+  // into the house at five in the morning — they should not have to know which
+  // section somebody filed it under.
+  { href: '/lighting', label: 'Lighting', permission: 'flock:view' },
   { href: '/biosecurity', label: 'Biosecurity', permission: 'biosecurity:view' },
   { href: '/inventory', label: 'Store', permission: 'inventory:view' },
   { href: '/purchases', label: 'Purchases', permission: 'procurement:view' },

@@ -60,3 +60,31 @@ written weeks apart still agree about the same number.
 `ddl.mjs` (the throwaway DDL generator, container-only) skipped scalar LIST
 fields, so `Supplier.supplies` was missing from the harness database and every
 supplier query failed with P2022. Fixed to emit `text[] NOT NULL DEFAULT '{}'`.
+
+## `lighting.mjs`
+
+38 checks. Three of them exist because the browser found real defects the unit
+tests could not:
+
+- **Unknown must not read as safe.** The warning about shortening a laying
+  flock's day had three states collapsed into two: known-in-lay got the loud
+  warning, and *everything else* — including "nobody has told this system when
+  laying starts" — got the mild one. The shipped draft was not attached to a
+  production type, so it hit exactly that path. Unknown now says it is unknown,
+  and the draft attaches itself to the farm's production type when there is only
+  one.
+- **A warning that fires on every correct save is not a warning.** A blank lux
+  figure is true of almost every row on almost every farm, and it was forcing a
+  confirm-and-resubmit on every single step. It is information on the programme
+  screen now, not a gate.
+- **No latitude, no times.** The farm's coordinates are nullable and nothing
+  fills them in. The suite asserts the screen prints *no* switch-on time at all
+  rather than quietly assuming 6°N because the farm is in Ghana.
+
+### Selector traps, both hit here
+
+1. `button[type=submit]` matches the navigation's sign-out form. Scope to
+   `main form button[type=submit]`.
+2. `:has-text("Save")` also matches `"Save this step"`, so the mode form's save
+   silently submitted the step form instead. Use `:text-is("Save")` when one
+   button's label is a substring of another's.
