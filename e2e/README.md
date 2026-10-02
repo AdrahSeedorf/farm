@@ -88,3 +88,28 @@ tests could not:
 2. `:has-text("Save")` also matches `"Save this step"`, so the mode form's save
    silently submitted the step form instead. Use `:text-is("Save")` when one
    button's label is a substring of another's.
+
+## `breed-standards.mjs`
+
+33 checks. This suite exists because the feature it tests was **inert**: the
+weight curve, the lay curve, the interpolation and the "points behind standard"
+figure were all built and tested, every screen that used them showed a dash, and
+the only way to load a table was a terminal script. The weights page went as far
+as telling a farm owner to run `npm run standards:load`.
+
+So the assertions are about a dash *becoming a number*, end to end: paste a lay
+curve, confirm what it was read as, and watch the flock's own production screen
+stop saying "no lay curve has been loaded for ISA Brown".
+
+Two findings worth keeping:
+
+- **A message that could never be read.** The removal confirmation was rendered
+  inside the form that a successful removal makes disappear — the branch
+  unmounts, so the toast could not show. Removed; the empty state that replaces
+  it carries the consequence instead, which is the better sentence anyway.
+- **`ON_ERROR_STOP=1`.** This suite's `sql()` helper sets it, unlike the others.
+  The first fixture left `ageDays` off a `ProductionRecord` insert; psql carried
+  on, the row was never written, and the suite reported "Nothing recorded yet" as
+  though the screen were at fault. It then immediately caught two more missing
+  columns. A fixture that silently skips a statement is the same bug class this
+  suite was written to catch.

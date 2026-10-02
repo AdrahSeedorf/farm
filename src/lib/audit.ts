@@ -99,6 +99,12 @@ export type AuditAction =
   // one lever that decides whether birds lay. Audited for the same reason an
   // alert threshold is: a figure quietly altered in March is why production fell
   // in April, and this is how that is found.
+  // A breed standard is what every flock of that breed is judged against. The
+  // kind of table it was read as cannot be checked afterwards — a lay curve in
+  // the weight column gives plausible, wrong targets — so who loaded it and as
+  // what is on the record.
+  | 'breedStandard.load'
+  | 'breedStandard.clear'
   | 'lighting.start'
   | 'lighting.step.save'
   | 'lighting.step.remove'

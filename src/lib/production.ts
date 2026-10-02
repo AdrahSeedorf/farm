@@ -338,8 +338,9 @@ export function layMilestones(
  * "layer" curve would report a healthy flock as behind target.
  *
  * THE FIGURES ARE NOT SHIPPED. They come from the breeder's own management guide
- * via `npm run standards:load`, and a breed with none reports no comparison
- * rather than being scored against a guess.
+ * — pasted in under Settings → Breed standards, or loaded from a file with
+ * `npm run standards:load` — and a breed with none reports no comparison rather
+ * than being scored against a guess.
  */
 export type LayStandard = Record<number, number>;
 

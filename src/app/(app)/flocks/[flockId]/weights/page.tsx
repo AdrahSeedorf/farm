@@ -79,9 +79,19 @@ export default async function WeightsPage({
 
       {!hasStandard ? (
         <p className="mt-5 rounded-control border-l-2 border-status-attention bg-status-attention-bg px-4 py-3 text-[14px] text-[#6B4E12]">
-          {flock.breedRef
-            ? `No weight standard loaded for ${flock.breedRef.name}, so samples show without a target. The figures come from that breed's management guide — load them with npm run standards:load and every sample becomes on target or behind.`
-            : 'No breed was chosen for this flock, so there is nothing to compare against. Set the breed on the flock, then load that breed\u2019s weight table.'}
+          {flock.breedRef ? (
+            <>
+              No weight standard loaded for {flock.breedRef.name}, so samples show without a
+              target. The figures come from that breed&rsquo;s management guide, free to download
+              — paste the two columns in at{' '}
+              <Link href="/settings/breeds" className="font-semibold underline">
+                Settings → Breed standards
+              </Link>{' '}
+              and every sample becomes on target or behind.
+            </>
+          ) : (
+            'No breed was chosen for this flock, so there is nothing to compare against. Set the breed on the flock, then load that breed\u2019s weight table.'
+          )}
         </p>
       ) : null}
 

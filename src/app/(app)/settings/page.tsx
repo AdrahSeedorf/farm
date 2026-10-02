@@ -150,11 +150,11 @@ export default async function SettingsPage() {
 
         <p className="mt-4 rounded-control border border-border-default bg-surface-sunken px-3.5 py-3 text-[13px] text-text-secondary">
           Both the weight table and the lay curve come from the breeder&apos;s own management
-          guide, never from this system. Load either with{' '}
-          <code className="font-mono text-text-primary">
-            npm run standards:load -- &lt;file.csv&gt; --breed &lt;key&gt;
-          </code>
-          — the kind is read off the column headings and printed before anything is written. A
+          guide, never from this system. Paste them in at{' '}
+          <Link href="/settings/breeds" className="font-semibold text-brand-primary">
+            Breed standards
+          </Link>
+          — the kind is read off the column headings and shown before anything is written. A
           breed with none reports no comparison rather than scoring a flock against a guess.
         </p>
 
@@ -179,6 +179,24 @@ export default async function SettingsPage() {
           className="mt-4 inline-flex min-h-touch items-center rounded-control border border-border-strong bg-surface-card px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
         >
           {gradeCount} grade{gradeCount === 1 ? '' : 's'} set up
+        </Link>
+      </section>
+
+      <section className="mt-6 rounded-card border border-border-default bg-surface-card p-6">
+        <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-brand-accent">
+          Breed standards
+        </h2>
+        <p className="mt-3 text-[14px] text-text-secondary">
+          What a bird of your breed should weigh at a given age, and how much it should be
+          laying. Both come from the breeder&rsquo;s own management guide, free to download, and
+          until they are loaded every &ldquo;vs standard&rdquo; figure on every screen reads a
+          dash.
+        </p>
+        <Link
+          href="/settings/breeds"
+          className="mt-4 inline-flex min-h-touch items-center rounded-control border border-border-strong bg-surface-card px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
+        >
+          Load the tables
         </Link>
       </section>
 

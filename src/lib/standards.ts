@@ -269,3 +269,92 @@ export function detectKind(input: string): StandardKind | null {
   if (header.some((h) => PCT_ALIASES.includes(h))) return 'lay';
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// SHOWING SOMEBODY WHAT THEY PASTED, BEFORE IT IS SAVED
+// ---------------------------------------------------------------------------
+
+/**
+ * WHY THERE IS A CONFIRMATION STEP AT ALL.
+ *
+ * These two tables look identical. Both are two columns of numbers copied out of
+ * a management guide; one is grams and one is a percentage, and the header is
+ * the only thing that tells them apart. A lay curve written into the weight
+ * column produces targets of 28 grams at week 20 — plausible-looking, entirely
+ * wrong, and silent. Nothing downstream would catch it, because 28 is a number.
+ *
+ * So the kind is DETECTED, SAID OUT LOUD, and agreed to before anything is
+ * written. The command-line loader already printed it before writing; the screen
+ * does the same thing, and the agreement is bound to the pasted content so that
+ * editing the table invalidates it.
+ */
+export interface TablePreview {
+  kind: StandardKind | null;
+  /** Points, oldest age first. Empty when the table could not be read. */
+  points: { ageDays: number; value: number }[];
+  warnings: string[];
+  errors: string[];
+}
+
+export function previewOf(input: string, kindOverride?: StandardKind): TablePreview {
+  const kind = kindOverride ?? detectKind(input);
+
+  if (!kind) {
+    return {
+      kind: null,
+      points: [],
+      warnings: [],
+      errors: [
+        'This does not say which kind of table it is. The first line needs a column called "grams" for body weight, or "henDayPct" for the lay curve — copy the header row from the guide along with the figures, or choose the kind below.',
+      ],
+    };
+  }
+
+  if (kind === 'weight') {
+    const parsed = parseStandardTable(input);
+    return {
+      kind,
+      points: parsed.rows.map((r) => ({ ageDays: r.ageDays, value: r.grams })),
+      warnings: parsed.warnings,
+      errors: parsed.errors,
+    };
+  }
+
+  const parsed = parseLayCurveTable(input);
+  return {
+    kind,
+    points: parsed.rows.map((r) => ({ ageDays: r.ageDays, value: r.pct })),
+    warnings: parsed.warnings,
+    errors: parsed.errors,
+  };
+}
+
+export function kindLabel(kind: StandardKind): string {
+  return kind === 'weight' ? 'body weight table' : 'lay curve';
+}
+
+/** A point, in the units of its own kind. */
+export function pointLabel(kind: StandardKind, point: { ageDays: number; value: number }): string {
+  const weeks = Math.floor(point.ageDays / 7);
+  const unit = kind === 'weight' ? `${point.value} g` : `${point.value}%`;
+  return `day ${point.ageDays} (week ${weeks}) → ${unit}`;
+}
+
+/**
+ * What the person is being asked to agree to.
+ *
+ * NAMES THE KIND FIRST, because that is the thing that can be wrong in a way
+ * nothing else will notice.
+ */
+export function previewSentence(preview: TablePreview): string {
+  if (!preview.kind || preview.points.length === 0) return 'Nothing could be read from that.';
+
+  const first = preview.points[0];
+  const last = preview.points[preview.points.length - 1];
+  const span =
+    preview.points.length === 1
+      ? pointLabel(preview.kind, first)
+      : `${pointLabel(preview.kind, first)} … ${pointLabel(preview.kind, last)}`;
+
+  return `Read as a ${kindLabel(preview.kind)}: ${preview.points.length} points, ${span}.`;
+}

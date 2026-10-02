@@ -50,7 +50,7 @@ export async function updateOrganisation(
  * Add a breed to the catalogue.
  *
  * The NAME only. Weight figures are loaded from the breeder's own management
- * guide with `npm run standards:load`, because a curve typed in by hand is a
+ * guide, pasted in under Settings → Breed standards, because a curve invented here is a
  * curve nobody can trace back to a source — and a flock would then be judged
  * behind target against numbers with no provenance.
  */
@@ -92,7 +92,12 @@ export async function addBreed(_prev: FormState, formData: FormData): Promise<Fo
   });
 
   revalidatePath('/settings');
-  return { ok: `${breed.name} added. Load its weight table with: npm run standards:load -- <file.csv> --breed ${key}` };
+  // POINTS AT A SCREEN, NOT A TERMINAL. The person adding a breed to a poultry
+  // farm's catalogue is not going to run an npm script, and telling them to was
+  // why six breeds sat with no figures in them for weeks.
+  return {
+    ok: `${breed.name} added. Load its weight table and lay curve under Settings → Breed standards.`,
+  };
 }
 
 // ---------------------------------------------------------------------------

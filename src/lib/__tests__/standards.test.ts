@@ -5,6 +5,9 @@ import {
   toStandardMap,
   toLayCurveMap,
   detectKind,
+  previewOf,
+  previewSentence,
+  kindLabel,
 } from '../standards';
 
 describe('parsing a breed standard table', () => {
@@ -214,5 +217,100 @@ describe('telling the two tables apart', () => {
     // weight column where it would look plausible and be nonsense.
     expect(detectKind('week,height\n1,70')).toBeNull();
     expect(detectKind('')).toBeNull();
+  });
+});
+
+/**
+ * THE CONFIRMATION STEP.
+ *
+ * The two tables are indistinguishable at a glance — both are two columns of
+ * numbers out of a management guide. A lay curve written into the weight column
+ * gives a target of 28 grams at week 20: a plausible number, entirely wrong, and
+ * nothing downstream can catch it, because 28 is a number. So the kind is
+ * detected, said out loud and agreed to before anything is written.
+ */
+describe('showing somebody what they pasted', () => {
+  const WEIGHT = 'week,grams\n1,70\n2,115\n18,1450';
+  const LAY = 'week,henDayPct\n20,28.5\n30,94.0\n70,78.5';
+
+  it('reads a weight table as a weight table', () => {
+    const preview = previewOf(WEIGHT);
+    expect(preview.kind).toBe('weight');
+    expect(preview.points).toHaveLength(3);
+    expect(preview.errors).toEqual([]);
+  });
+
+  it('reads a lay curve as a lay curve', () => {
+    const preview = previewOf(LAY);
+    expect(preview.kind).toBe('lay');
+    expect(preview.points.map((p) => p.value)).toEqual([28.5, 94, 78.5]);
+  });
+
+  it('REFUSES a table that does not say which kind it is', () => {
+    // Rather than guessing. Guessing here is the one mistake that cannot be
+    // noticed afterwards.
+    const preview = previewOf('week,value\n1,70\n2,115');
+    expect(preview.kind).toBeNull();
+    expect(preview.points).toEqual([]);
+    expect(preview.errors.join(' ')).toMatch(/does not say which kind of table/);
+  });
+
+  /**
+   * A GUIDE OFTEN PRINTS BOTH COLUMNS IN ONE TABLE. Detection reads the first it
+   * recognises, which is the weight column — so the override is what lets the
+   * lay curve be taken out of the same paste rather than retyped.
+   */
+  it('lets the kind be stated by hand when one table holds both columns', () => {
+    const both = 'week,grams,henDayPct\n20,1750,28.5\n30,1900,94.0';
+    expect(previewOf(both).kind).toBe('weight');
+    expect(previewOf(both).points.map((p) => p.value)).toEqual([1750, 1900]);
+    expect(previewOf(both, 'lay').points.map((p) => p.value)).toEqual([28.5, 94]);
+  });
+
+  it('keeps the parser’s own precise error when a column is missing', () => {
+    // "No weight column found. Use a header of grams." is more actionable than
+    // anything this layer could add, so it is passed through untouched.
+    const preview = previewOf('week,value\n1,70', 'weight');
+    expect(preview.points).toEqual([]);
+    expect(preview.errors.join(' ')).toMatch(/No weight column found/);
+  });
+
+  it('names the kind FIRST in the sentence somebody has to agree to', () => {
+    expect(previewSentence(previewOf(LAY))).toMatch(/^Read as a lay curve:/);
+    expect(previewSentence(previewOf(WEIGHT))).toMatch(/^Read as a body weight table:/);
+  });
+
+  it('states the span in both days and weeks, and in the right unit', () => {
+    const sentence = previewSentence(previewOf(WEIGHT));
+    expect(sentence).toMatch(/day 7 \(week 1\) → 70 g/);
+    expect(sentence).toMatch(/day 126 \(week 18\) → 1450 g/);
+    expect(sentence).not.toMatch(/%/);
+  });
+
+  it('uses percentages for a lay curve and never grams', () => {
+    const sentence = previewSentence(previewOf(LAY));
+    expect(sentence).toMatch(/→ 28.5%/);
+    expect(sentence).not.toMatch(/ g\b/);
+  });
+
+  it('says plainly when nothing could be read, rather than returning an empty string', () => {
+    expect(previewSentence(previewOf(''))).toBe('Nothing could be read from that.');
+  });
+
+  it('does not collapse a single-point table into a range', () => {
+    const sentence = previewSentence(previewOf('week,grams\n18,1450'));
+    expect(sentence).toMatch(/1 points/);
+    expect(sentence).not.toMatch(/…/);
+  });
+
+  it('carries the parser’s own warnings through to the person', () => {
+    // A row the parser skipped must not vanish between the paste and the save.
+    const preview = previewOf('week,grams\n1,70\nnonsense\n2,115');
+    expect(preview.warnings.length).toBeGreaterThan(0);
+  });
+
+  it('labels each kind the way a farm would say it', () => {
+    expect(kindLabel('weight')).toBe('body weight table');
+    expect(kindLabel('lay')).toBe('lay curve');
   });
 });
