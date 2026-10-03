@@ -59,7 +59,12 @@ SELECT
   stage_id,
   now()
 FROM ctx
-ON CONFLICT (id) DO UPDATE SET "currentStageId" = EXCLUDED."currentStageId";
+ON CONFLICT (id) DO UPDATE SET
+  "currentStageId" = EXCLUDED."currentStageId",
+  -- REOPENED, not just re-stamped. A suite that closes flocks to narrow a
+  -- screen leaves this one shut, and every suite that needs it then fails for
+  -- a reason that looks nothing like the cause.
+  "closedAt" = NULL;
 
 DELETE FROM "AnimalGroupEvent" WHERE "animalGroupId" = 'flk-e2e-1';
 

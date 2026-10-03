@@ -132,3 +132,29 @@ Two findings worth keeping:
 
 Like `breed-standards.mjs`, this suite's `sql()` sets `ON_ERROR_STOP=1`. Worth
 backporting to the older suites.
+
+## `daily.mjs` and `production.mjs`
+
+24 and 21 checks, over the two screens every derived figure on this farm traces
+back to — and which had no browser coverage at all until now.
+
+The check worth the whole exercise is in `daily.mjs`: **the acknowledgement is
+bound to the content.** Warn on 50 deaths, change the figure to 120, resubmit
+carrying the old acknowledgement — the new number must be warned about again
+rather than saved silently. That is the exact bug `warnings.ts` exists to
+prevent, it was found in this form once before, and nothing had ever proved in a
+browser that the fix holds. The token is read off the page and compared, so the
+test fails if it ever stops changing with the entry.
+
+`production.mjs` pins the rule the whole system rests on: a correction is a new
+row carrying the negative of the one it reverses, the original keeps its figure,
+and `correctsId` is UNIQUE so the database itself refuses a second correction of
+the same collection.
+
+### A fixture rule, learned the hard way
+
+`daily.mjs` originally closed every other flock so its screen was about one
+house. That reached into data three other suites depend on and broke them for
+reasons that looked nothing like the cause. **A fixture may create and reset its
+own rows; narrowing a shared screen is the suite's job.** `ensureFlock` now also
+clears `closedAt`, so this particular damage self-heals.
