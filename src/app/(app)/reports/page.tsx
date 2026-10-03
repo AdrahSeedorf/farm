@@ -61,9 +61,10 @@ export default async function ReportsPage({
   const today = new Date();
   const period = periodFor(key, today, valid ? custom : undefined);
 
-  const [figures, canSeeMoney, stores, counts] = await Promise.all([
+  const [figures, canSeeMoney, canExport, stores, counts] = await Promise.all([
     figuresFor(principal, period),
     currentUserCan('price:view'),
+    currentUserCan('report:export'),
     produceStoreNames(principal),
     lastCountedByLocation(principal),
   ]);
@@ -74,6 +75,13 @@ export default async function ReportsPage({
     .map((c) => c.lastCountedOn)
     .filter((d): d is Date => d !== null)
     .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+
+  // The dates travel with the download so a custom period exports what is on
+  // screen rather than silently falling back to this week.
+  const query =
+    valid && custom
+      ? `&from=${custom.from.toISOString().slice(0, 10)}&to=${custom.to.toISOString().slice(0, 10)}`
+      : '';
 
   const derived = derive(figures, daysIn(period));
   const check = reconcile(figures);
@@ -89,6 +97,34 @@ export default async function ReportsPage({
           <PeriodPicker current={key} />
         </Suspense>
       </div>
+
+      {/*
+        PLAIN LINKS, NOT BUTTONS, because the answer is a file and a link is what
+        a browser already knows how to save. Hiding them from somebody without
+        `report:export` is a courtesy; the route checks the permission itself,
+        because a URL can be typed.
+      */}
+      {canExport && !future ? (
+        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2">
+          <a
+            href={`/reports/export?period=${key}${query}`}
+            className="text-[14px] font-semibold text-brand-primary hover:underline"
+          >
+            Download the summary (CSV)
+          </a>
+          <a
+            href={`/reports/export?sheet=daily&period=${key}${query}`}
+            className="text-[14px] font-semibold text-brand-primary hover:underline"
+          >
+            Download day by day (CSV)
+          </a>
+          {!canSeeMoney ? (
+            <span className="text-[13px] text-text-muted">
+              Money figures are left out of the file, as they are off this screen.
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       {future ? (
         <p className="mt-7 rounded-control border border-border-strong bg-surface-sunken px-4 py-3 text-[14px] text-text-primary">

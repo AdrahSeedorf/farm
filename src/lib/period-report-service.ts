@@ -3,7 +3,8 @@ import { db } from '@/lib/db';
 import type { Principal } from '@/lib/rbac';
 import { orgFilter, siteFilter } from '@/lib/scope';
 import { pesewas, ZERO, type Pesewas } from '@/lib/money';
-import { round } from '@/lib/metrics';
+import { round, ageInDays } from '@/lib/metrics';
+import { populationSeries, type PopulationEvent } from '@/lib/ledger';
 import { isLive } from '@/lib/dispatch';
 import { lineTotal } from '@/lib/sales';
 import {
@@ -324,3 +325,157 @@ export async function produceStoreNames(principal: Principal): Promise<string[]>
 }
 
 export { ZERO };
+
+// ---------------------------------------------------------------------------
+// THE DAILY SERIES, FOR EXPORT
+// ---------------------------------------------------------------------------
+
+/**
+ * One row per house per day, over the period.
+ *
+ * A DAY WITH NO RECORD IS ABSENT, NOT ZERO. This is the whole reason the export
+ * is built from the records rather than from a date range walked day by day: a
+ * house nobody visited on Sunday did not collect zero eggs, it was not written
+ * down, and a spreadsheet full of invented zeros would drag every average on the
+ * farm downwards while looking complete.
+ *
+ * FOUR QUERIES, NOT ONE PER DAY. The production records, the population events,
+ * the feed issues and the flocks are each read once for the whole period, and
+ * joined in memory. A loop that queried per day would be hundreds of round trips
+ * to draw one file.
+ */
+export async function dailySeriesFor(
+  principal: Principal,
+  period: Period,
+): Promise<DaySeriesRow[]> {
+  const flocks = await db.animalGroup.findMany({
+    where: { site: orgFilter(principal), ...siteFilter(principal) },
+    select: { id: true, code: true, dateOfHatch: true, productionUnit: { select: { name: true } } },
+  });
+  if (flocks.length === 0) return [];
+
+  const flockIds = flocks.map((f) => f.id);
+  const window = { gte: period.from, lte: period.to };
+
+  const [records, events, feed, grades] = await Promise.all([
+    db.productionRecord.findMany({
+      where: { animalGroupId: { in: flockIds }, onDate: window },
+      select: {
+        animalGroupId: true,
+        onDate: true,
+        countedBase: true,
+        lines: { select: { productionGradeId: true, quantityBase: true } },
+      },
+    }),
+    db.animalGroupEvent.findMany({
+      where: { animalGroupId: { in: flockIds } },
+      select: { animalGroupId: true, type: true, delta: true, occurredOn: true },
+    }),
+    // FROM THE DAILY SHEET, not from the cost ledger. FlockCostEntry carries
+    // what the feed COST and no quantity at all; what somebody in the house
+    // actually observed and wrote down is kilograms, and that is the figure a
+    // daily series is for.
+    db.dailyRecord.findMany({
+      where: { animalGroupId: { in: flockIds }, onDate: window, feedKg: { not: null } },
+      select: { animalGroupId: true, onDate: true, feedKg: true },
+    }),
+    db.productionGrade.findMany({ select: { id: true, isSaleable: true } }),
+  ]);
+
+  const saleableGrades = new Set(grades.filter((g) => g.isSaleable).map((g) => g.id));
+
+  // Only days something was actually written down for.
+  const key = (flockId: string, date: Date) => `${flockId}|${date.toISOString().slice(0, 10)}`;
+  const touched = new Map<string, { flockId: string; onDate: Date }>();
+  for (const r of records) touched.set(key(r.animalGroupId, r.onDate), {
+    flockId: r.animalGroupId,
+    onDate: r.onDate,
+  });
+  for (const e of events) {
+    if (e.occurredOn < period.from || e.occurredOn > period.to) continue;
+    touched.set(key(e.animalGroupId, e.occurredOn), {
+      flockId: e.animalGroupId,
+      onDate: e.occurredOn,
+    });
+  }
+  for (const f of feed) touched.set(key(f.animalGroupId, f.onDate), {
+    flockId: f.animalGroupId,
+    onDate: f.onDate,
+  });
+
+  const out: DaySeriesRow[] = [];
+  for (const flock of flocks) {
+    const days = [...touched.values()]
+      .filter((t) => t.flockId === flock.id)
+      .map((t) => t.onDate)
+      .sort((a, b) => a.getTime() - b.getTime());
+    if (days.length === 0) continue;
+
+    const populations = populationSeries(
+      events
+        .filter((e) => e.animalGroupId === flock.id)
+        .map((e) => ({
+          type: e.type as PopulationEvent['type'],
+          delta: e.delta,
+          occurredOn: e.occurredOn,
+        })),
+      days,
+    );
+
+    for (const day of populations) {
+      const k = key(flock.id, day.onDate);
+      const dayRecords = records.filter((r) => key(r.animalGroupId, r.onDate) === k);
+      const dayEvents = events.filter(
+        (e) => key(e.animalGroupId, e.occurredOn) === k,
+      );
+
+      let collected = 0;
+      let saleable = 0;
+      for (const record of dayRecords) {
+        const graded = record.lines.reduce((sum, l) => sum + l.quantityBase, 0);
+        collected += graded > 0 ? graded : (record.countedBase ?? 0);
+        saleable += record.lines
+          .filter((l) => saleableGrades.has(l.productionGradeId))
+          .reduce((sum, l) => sum + l.quantityBase, 0);
+      }
+
+      out.push({
+        onDate: day.onDate,
+        flockCode: flock.productionUnit?.name
+          ? `${flock.code} (${flock.productionUnit.name})`
+          : flock.code,
+        ageDays: ageInDays(flock.dateOfHatch, day.onDate),
+        openingBirds: day.opening,
+        closingBirds: day.closing,
+        deaths: dayEvents.filter((e) => e.type === 'MORTALITY').reduce((s, e) => s - e.delta, 0),
+        culls: dayEvents.filter((e) => e.type === 'CULL').reduce((s, e) => s - e.delta, 0),
+        collected: round(collected, 2) ?? 0,
+        saleable: round(saleable, 2) ?? 0,
+        feedKg:
+          round(
+            feed
+              .filter((f) => key(f.animalGroupId, f.onDate) === k)
+              .reduce((s, f) => s + (f.feedKg ?? 0), 0),
+            2,
+          ) ?? 0,
+      });
+    }
+  }
+
+  return out.sort(
+    (a, b) => a.onDate.getTime() - b.onDate.getTime() || a.flockCode.localeCompare(b.flockCode),
+  );
+}
+
+export interface DaySeriesRow {
+  onDate: Date;
+  flockCode: string;
+  ageDays: number;
+  openingBirds: number;
+  closingBirds: number;
+  deaths: number;
+  culls: number;
+  collected: number;
+  saleable: number;
+  feedKg: number;
+}

@@ -54,6 +54,26 @@ describe('the role matrix honours the specification', () => {
     expect(can(store, 'finance:view')).toBe(false);
   });
 
+  /**
+   * A SUPERVISOR MAY TAKE THE REPORT AWAY AND STILL NOT SEE A PRICE.
+   *
+   * These two facts together are what keep the export's price-gating alive: if
+   * the only people who could download were also the people who may see money,
+   * the branch that omits money from the file could never run.
+   */
+  it('a supervisor may export the report, and gets no money in it', () => {
+    const sup = principal(['supervisor']);
+    expect(can(sup, 'report:view')).toBe(true);
+    expect(can(sup, 'report:export')).toBe(true);
+    expect(can(sup, 'price:view')).toBe(false);
+  });
+
+  it('the counter roles may read the report but not take a copy', () => {
+    for (const role of ['sales', 'storekeeper', 'driver']) {
+      expect(can(principal([role as never]), 'report:export')).toBe(false);
+    }
+  });
+
   it('SPEC: the supervisor runs operations but sees no margins or prices', () => {
     const sup = principal(['supervisor']);
     expect(can(sup, 'dailyRecord:approve')).toBe(true);

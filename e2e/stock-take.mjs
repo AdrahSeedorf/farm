@@ -95,7 +95,6 @@ const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromi
 const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
 page.on('pageerror', (e) => failures.push(`Uncaught page error: ${e.message}`));
 const text = () => page.evaluate(() => document.querySelector('main')?.innerText ?? '');
-const html = () => page.content();
 
 async function open(path, marker = 'main') {
   await page.goto(`${BASE}${path}`, { waitUntil: 'domcontentloaded' });

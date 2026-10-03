@@ -287,13 +287,21 @@ describe('the list', () => {
 });
 
 describe('what a buyer has been committed to', () => {
-  // DELIBERATELY NOT CALLED A BALANCE. A balance is what is owed, and payments
-  // are not recorded anywhere yet.
-  it('IS NOT CALLED A BALANCE, AND SAYS WHY', () => {
+  /**
+   * DELIBERATELY NOT CALLED A BALANCE. A balance subtracts what has been paid;
+   * this is the sum of confirmed orders and nothing else.
+   *
+   * The sentence used to end "payments are not recorded yet", which stopped
+   * being true the day Money in was built. The test now pins the opposite: it
+   * must point at where payments actually live, and must never claim they do
+   * not exist.
+   */
+  it('IS NOT CALLED A BALANCE, AND SAYS WHERE PAYMENTS LIVE', () => {
     const sentence = committedSentence([order({ state: 'CONFIRMED' })]);
     expect(sentence).toContain('GHS 135.00');
     expect(sentence).toMatch(/not what is owed/);
-    expect(sentence).toMatch(/payments are not recorded yet/i);
+    expect(sentence).toMatch(/Money in/);
+    expect(sentence).not.toMatch(/payments are not recorded/i);
     expect(sentence.toLowerCase()).not.toContain('balance');
   });
 

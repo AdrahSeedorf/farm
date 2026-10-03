@@ -415,9 +415,12 @@ export function headline(figures: PeriodFigures, derived: DerivedFigures): strin
  */
 export function agreedSentence(figures: PeriodFigures): string {
   if (figures.loads === 0) return 'Nothing went out in this period.';
+  // WAS "payments are not recorded yet", which stopped being true the day
+  // Money in was built. A caveat that has quietly become false is worse than no
+  // caveat: it is a reassurance, and somebody acts on it.
   return `${formatGHS(figures.agreedPesewas)} agreed across ${figures.loads} ${
     figures.loads === 1 ? 'load' : 'loads'
-  }. This is what was agreed, not what has been received — payments are not recorded yet.`;
+  }. This is what was agreed, not what has been received — money received is on Money in, against the buyer rather than the load.`;
 }
 
 export function lossSentence(figures: PeriodFigures, derived: DerivedFigures): string {

@@ -113,3 +113,22 @@ Two findings worth keeping:
   though the screen were at fault. It then immediately caught two more missing
   columns. A fixture that silently skips a statement is the same bug class this
   suite was written to catch.
+
+## `export.mjs`
+
+31 checks. Two findings worth keeping:
+
+- **A safeguard that could never run.** The export omits money for anyone without
+  `price:view` — but no role held `report:export` without also holding
+  `price:view`, so that branch was unreachable on this farm. The supervisor now
+  holds `report:export`, which makes the gating live and gives the permission a
+  real meaning: the people who run production may take a copy away, the people at
+  the counter may not.
+- **`response.text()` strips a byte order mark.** The first BOM check passed
+  against a decoded string and would have gone on passing if the BOM were
+  removed. It reads the first three bytes now.
+
+### Fixture note
+
+Like `breed-standards.mjs`, this suite's `sql()` sets `ON_ERROR_STOP=1`. Worth
+backporting to the older suites.

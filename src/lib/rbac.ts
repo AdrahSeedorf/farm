@@ -131,7 +131,23 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     ...some('attendance', ['view', 'create', 'edit', 'approve']),
     ...all('task'),
     ...some('incident', ['view', 'create', 'edit', 'approve']),
-    ...some('report', ['view']),
+    /**
+     * EXPORT, AS WELL AS VIEW — and this was a deliberate change, not an
+     * oversight corrected.
+     *
+     * A supervisor already reads every figure on the report screen. Export adds
+     * no information they lack; it lets them take a copy away, which the audit
+     * log records. Without it, the only people who could download the report
+     * were the two who can also see prices — which meant the export's
+     * price-gating branch, the one that omits money for somebody without
+     * `price:view`, could never run on this farm. A permission that makes a
+     * safeguard unreachable is worse than one that is slightly wider.
+     *
+     * What `report:export` now separates is the people who run production from
+     * the people at the counter: storekeeper and sales hold `report:view` and
+     * not this.
+     */
+    ...some('report', ['view', 'export']),
   ],
 
   // The phone-in-the-house role. Enters what they observe, reports problems.

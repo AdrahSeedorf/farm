@@ -103,6 +103,10 @@ export type AuditAction =
   // kind of table it was read as cannot be checked afterwards — a lay curve in
   // the weight column gives plausible, wrong targets — so who loaded it and as
   // what is on the record.
+  // Reading a screen is not logged; taking a copy of the farm's figures away
+  // is. Not because exporting is suspicious, but because "who had the March
+  // numbers before that meeting?" is a question with an answer.
+  | 'report.export'
   | 'breedStandard.load'
   | 'breedStandard.clear'
   | 'lighting.start'

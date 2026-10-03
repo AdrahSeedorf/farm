@@ -365,5 +365,9 @@ export function committedSentence(orders: SalesOrder[]): string {
   const value = orderTotal(confirmed.flatMap((o) => o.lines));
   return `${formatGHS(value)} across ${confirmed.length} confirmed ${
     confirmed.length === 1 ? 'order' : 'orders'
-  }. This is what was agreed, not what is owed — payments are not recorded yet.`;
+  // "payments are not recorded yet" stopped being true the day Money in was
+  // built. A caveat that has quietly become false is worse than none: it reads
+  // as a reassurance, and somebody acts on it. What is still true is that this
+  // figure is orders, not a balance — a balance subtracts what has been paid.
+  }. This is what was agreed, not what is owed — what has been paid is on Money in.`;
 }
