@@ -59,19 +59,33 @@ export async function programmeById(principal: Principal, programmeId: string) {
  * instruction anyone acts on.
  */
 export async function touchProgramme(
+  principal: Principal,
   programmeId: string,
   options: { contentChanged: boolean },
 ): Promise<void> {
+  /**
+   * TAKES A PRINCIPAL, AND SCOPES ON IT.
+   *
+   * This function's whole job is to strip an approval off a programme — the
+   * named veterinarian, their role, the date they signed it. Without the filter
+   * below it did that to any programme in any organisation whose id reached it.
+   *
+   * Every caller happened to check first, so nothing was exploitable. But the
+   * one function in the system whose purpose is to remove a record of veterinary
+   * oversight should not be relying on the memory of whoever calls it next.
+   */
+  const where = { id: programmeId, ...orgFilter(principal) };
+
   if (!options.contentChanged) {
-    await db.healthProgramme.update({
-      where: { id: programmeId },
+    await db.healthProgramme.updateMany({
+      where,
       data: { updatedAt: new Date() },
     });
     return;
   }
 
-  await db.healthProgramme.update({
-    where: { id: programmeId },
+  await db.healthProgramme.updateMany({
+    where,
     data: {
       status: 'DRAFT',
       approvedByName: null,

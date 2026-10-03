@@ -176,11 +176,16 @@ async function feedSourcesFor(
 
 /** Everything the entry screen needs for one flock, in a handful of queries. */
 export async function dailyContextFor(
+  principal: Principal,
   flockId: string,
   onDate: Date,
 ): Promise<DailyContext | null> {
-  const flock = await db.animalGroup.findUnique({
-    where: { id: flockId },
+  // SCOPED HERE TOO. This returns a whole flock's context — its stage, its
+  // standards, yesterday's record — and it was fetched by bare id. Returning
+  // null for a flock in another organisation is the same answer as for one that
+  // does not exist, which is what a caller should be told either way.
+  const flock = await db.animalGroup.findFirst({
+    where: { id: flockId, site: { organisationId: principal.organisationId } },
     include: {
       productionUnit: { select: { name: true } },
       currentStage: { select: { name: true } },
@@ -409,7 +414,7 @@ export async function submitDailyRecord(
   flockId: string,
   input: DailyRecordInput,
 ): Promise<SubmitResult> {
-  const context = await dailyContextFor(flockId, input.onDate);
+  const context = await dailyContextFor(principal, flockId, input.onDate);
   if (!context) return { status: 'error', message: 'That flock no longer exists.' };
 
   if (context.existing) {

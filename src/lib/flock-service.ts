@@ -4,7 +4,7 @@ import { db } from '@/lib/db';
 import { deltaFor, type AnimalGroupEventType } from '@/lib/ledger';
 import { ageInDays } from '@/lib/metrics';
 import type { Principal } from '@/lib/rbac';
-import { orgFilter, siteFilter } from '@/lib/scope';
+import { canAccessSite, orgFilter, siteFilter } from '@/lib/scope';
 
 /**
  * Flock service — ADRAH Farms
@@ -76,11 +76,31 @@ export async function recordEventWithin(
 ): Promise<{ id: string; delta: number; population: number }> {
   const delta = deltaFor(input.type, input.quantity);
 
-  const group = await tx.animalGroup.findUnique({
-    where: { id: input.animalGroupId },
+  /**
+   * SCOPED HERE, NOT ONLY IN THE CALLER.
+   *
+   * This is the only sanctioned writer to the population ledger, and that ledger
+   * is append-only: an event written against the wrong flock cannot be deleted,
+   * only offset by an adjustment that is itself permanent. Every caller today
+   * does check — but "every caller today" is a property of the code as it
+   * happens to be, not a control, and the next screen to need a ledger event is
+   * one forgotten line away from writing into another farm's birds.
+   *
+   * Its sibling `recordMovementWithin` in stock-movements.ts has always done
+   * this. This function selected `siteId` and then ignored it, which reads like
+   * an intention somebody never finished.
+   */
+  const group = await tx.animalGroup.findFirst({
+    where: {
+      id: input.animalGroupId,
+      site: { organisationId: principal.organisationId },
+    },
     select: { id: true, dateOfHatch: true, closedAt: true, siteId: true },
   });
   if (!group) throw new FlockError('That flock no longer exists.');
+  if (!canAccessSite(principal, group.siteId)) {
+    throw new FlockError('That flock is at a farm you do not cover.');
+  }
   if (group.closedAt && input.type !== 'ADJUSTMENT') {
     throw new FlockError(
       'This flock is closed. Reopen it before recording new events, or record a correction.',

@@ -31,7 +31,7 @@ export default async function DailyEntryPage({
   const today = new Date();
   const onDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
 
-  const context = await dailyContextFor(flockId, onDate);
+  const context = await dailyContextFor(principal, flockId, onDate);
   if (!context) notFound();
   if (!canAccessSite(principal, context.siteId)) notFound();
 

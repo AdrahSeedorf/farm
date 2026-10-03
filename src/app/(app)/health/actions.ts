@@ -87,7 +87,7 @@ export async function updateProgramme(
 
   // A name or a description changes no instruction anyone acts on, so the
   // approval stands.
-  await touchProgramme(programmeId, { contentChanged: false });
+  await touchProgramme(principal, programmeId, { contentChanged: false });
 
   await recordAudit({
     principal,
@@ -201,7 +201,7 @@ export async function addProgrammeItem(
   });
 
   // Content changed — any approval no longer covers what is here.
-  await touchProgramme(programmeId, { contentChanged: true });
+  await touchProgramme(principal, programmeId, { contentChanged: true });
 
   revalidatePath(`/health/${programmeId}`);
   return { ok: `${input.name} added at day ${input.ageDays}.` };
@@ -238,7 +238,7 @@ export async function removeProgrammeItem(
   }
 
   await db.healthProgrammeItem.delete({ where: { id: itemId } });
-  await touchProgramme(programmeId, { contentChanged: true });
+  await touchProgramme(principal, programmeId, { contentChanged: true });
 
   revalidatePath(`/health/${programmeId}`);
   return { ok: `${item.name} removed.` };
