@@ -20,7 +20,8 @@
     "standards:load": "tsx scripts/load-standards.ts",
     "user:password": "tsx scripts/set-password.ts",
     "postinstall": "prisma generate",
-    "perf:budget": "tsx scripts/check-performance-budget.mts"
+    "perf:budget": "tsx scripts/check-performance-budget.mts",
+    "restore:drill": "tsx scripts/restore-drill.mts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.1.0",
