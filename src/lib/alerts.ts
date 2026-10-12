@@ -156,6 +156,25 @@ export interface RuleDefinition {
   why: string;
 }
 
+/**
+ * Whether an item is something the farm BUYS.
+ *
+ * THE FARM DOES NOT ORDER ITS OWN EGGS. The reorder and run-out alerts were
+ * firing on produce, so a flock laying well enough to clear the store every day
+ * was told four times over that its eggs "need ordering" — from a supplier that
+ * does not exist, because the supplier is the birds.
+ *
+ * Found by loading a demo farm, which is exactly what a demo is for: the
+ * arithmetic was right on every screen and the sentence was absurd, and no unit
+ * test was ever going to notice.
+ *
+ * Expiry alerts are NOT affected and must not be: eggs are perishable, and a
+ * crate going out of date is the one stock warning produce genuinely needs.
+ */
+export function isPurchased(category: string): boolean {
+  return category !== 'FINISHED_PRODUCT';
+}
+
 export const RULE_CATALOGUE: Record<AlertRule, RuleDefinition> = {
   'stock.out': {
     label: 'Out of stock',

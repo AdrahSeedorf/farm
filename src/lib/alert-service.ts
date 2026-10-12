@@ -17,6 +17,7 @@ import {
   type Alert,
 } from '@/lib/alerts';
 import { stockOverview } from '@/lib/stock-service';
+import { isPurchased } from '@/lib/alerts';
 import { dueAcrossFlocks } from '@/lib/health-service';
 import { withdrawalsAcrossFlocks } from '@/lib/withdrawal-service';
 import { outstandingOrders } from '@/lib/order-service';
@@ -84,7 +85,11 @@ async function stockAlerts(principal: Principal, asOf: Date): Promise<Alert[]> {
   for (const row of rows) {
     const href = `/inventory/${row.id}`;
 
-    if (row.urgency === 'OUT') {
+    // ORDERING ALERTS ONLY FOR WHAT THE FARM BUYS. Produce runs low because it
+    // sold, which is the point of it. Expiry below still applies to produce.
+    if (!isPurchased(row.category)) {
+      // fall through to the expiry checks
+    } else if (row.urgency === 'OUT') {
       out.push(
         buildAlert('stock.out', {
           subject: row.id,

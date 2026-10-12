@@ -1,32 +1,33 @@
 import { describe, it, expect } from 'vitest';
 import {
-  ALERT_RULES,
-  RULE_CATALOGUE,
   ALERT_LEVELS,
-  LEVEL_LABELS,
-  worst,
-  buildAlert,
-  mortalityLevel,
-  thresholdsFrom,
-  thresholdBasisSentence,
+  ALERT_RULES,
   DEFAULT_MORTALITY_THRESHOLDS,
-  recordIsLate,
   DEFAULT_RECORD_DUE_HOUR,
-  dedupe,
-  sortAlerts,
-  visibleTo,
-  withoutAcknowledged,
+  LEVEL_LABELS,
+  MAX_PARK_DAYS,
+  RULE_CATALOGUE,
   alertSummary,
-  groupAlerts,
+  buildAlert,
   daysStanding,
-  standingSentence,
-  partitionAcknowledged,
+  dedupe,
+  groupAlerts,
+  isPurchased,
+  mortalityLevel,
   parkErrors,
   parkSentence,
-  MAX_PARK_DAYS,
+  partitionAcknowledged,
+  recordIsLate,
+  sortAlerts,
+  standingSentence,
+  thresholdBasisSentence,
   thresholdInBirds,
   thresholdInBirdsSentence,
+  thresholdsFrom,
   type Alert,
+  visibleTo,
+  withoutAcknowledged,
+  worst,
 } from '@/lib/alerts';
 import type { Permission } from '@/lib/rbac';
 import { PERMISSIONS } from '@/lib/rbac';
@@ -710,3 +711,27 @@ describe('a threshold said in birds', () => {
   });
 });
 
+
+/**
+ * THE FARM DOES NOT ORDER ITS OWN EGGS.
+ *
+ * Found by loading a demo farm: a flock laying well enough to clear the store
+ * every day was told four times over that its eggs "need ordering" — from a
+ * supplier that does not exist, because the supplier is the birds. The
+ * arithmetic was right on every screen and the sentence was absurd, which is
+ * the kind of defect no unit test was ever going to notice on its own.
+ */
+describe('which items can be ordered at all', () => {
+  it('treats everything the farm buys as orderable', () => {
+    for (const category of [
+      'FEED', 'VACCINE', 'MEDICINE', 'DISINFECTANT', 'PACKAGING',
+      'FUEL', 'PPE', 'EQUIPMENT', 'SPARE_PART', 'OTHER',
+    ]) {
+      expect(isPurchased(category)).toBe(true);
+    }
+  });
+
+  it('does NOT treat the farm’s own produce as orderable', () => {
+    expect(isPurchased('FINISHED_PRODUCT')).toBe(false);
+  });
+});
