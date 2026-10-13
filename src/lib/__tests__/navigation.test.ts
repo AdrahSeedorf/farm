@@ -6,6 +6,7 @@ import {
   buildNav,
   currentHref,
   permissionsNeeded,
+  wordsFor,
   type NavGroupSpec,
 } from '@/lib/navigation';
 import { ROLE_PERMISSIONS, PERMISSIONS, type Permission, type Role } from '@/lib/rbac';
@@ -187,6 +188,42 @@ describe('the words come from the species, not from poultry', () => {
     const labels = groups.flatMap((g) => g.items.map((i) => i.label));
     expect(labels).not.toContain('Eggs');
     expect(labels).not.toContain('Flocks');
+  });
+});
+
+describe('one species, several, or none', () => {
+  const poultryMap = {
+    animal: 'Bird',
+    animalGroup: 'Flock',
+    productionUnit: 'House',
+    production: 'Eggs',
+  };
+
+  it('uses the species own words when there is exactly one', () => {
+    expect(wordsFor([poultryMap]).production).toBe('Eggs');
+    expect(wordsFor([poultryMap]).animalPlural).toBe('Birds');
+  });
+
+  /**
+   * AMBIGUOUS IS NOT MISSING.
+   *
+   * A farm with birds and pigs has no single right word for its produce —
+   * "Eggs" would be wrong half the time. It gets "Production", which is a real
+   * word, rather than the deliberately awkward default.
+   */
+  it('says Production, not Eggs and not Output, on a farm with two species', () => {
+    const words = wordsFor([poultryMap, { animal: 'Pig', production: 'Piglets' }]);
+    expect(words.production).toBe('Production');
+    expect(words.animalPlural).toBe('Animals');
+  });
+
+  /**
+   * A farm with no species profile is misconfigured. It gets the awkward word,
+   * because a sentence that reads slightly wrong is how somebody notices, and a
+   * poultry-shaped fallback would hide it for months.
+   */
+  it('says Output when there is no species profile at all', () => {
+    expect(wordsFor([]).production).toBe('Output');
   });
 });
 

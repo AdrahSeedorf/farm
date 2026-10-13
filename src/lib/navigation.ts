@@ -1,5 +1,5 @@
 import type { Permission } from '@/lib/rbac';
-import type { Terminology } from '@/lib/terminology';
+import { DEFAULT_TERMINOLOGY, terminologyFrom, type Terminology } from '@/lib/terminology';
 import { ALERT_RULES, RULE_CATALOGUE } from '@/lib/alerts';
 
 /**
@@ -176,6 +176,31 @@ export const NAV_SPEC: NavGroupSpec[] = [
     ],
   },
 ];
+
+/**
+ * AMBIGUOUS IS NOT MISSING, and the two must not read the same.
+ *
+ * A farm running two species has no single right word for its produce: "Eggs"
+ * would be wrong half the time. "Production" is the honest answer and it is a
+ * real word a person recognises.
+ *
+ * A farm running NO species profile is misconfigured, and gets the deliberately
+ * awkward "Output" from the defaults — because a sentence that reads slightly
+ * wrong is how somebody notices, and a poultry-shaped fallback would hide the
+ * problem for months.
+ */
+export const AMBIGUOUS_TERMINOLOGY: Terminology = {
+  ...DEFAULT_TERMINOLOGY,
+  production: 'Production',
+  productionSingular: 'Production',
+};
+
+/** The words for a farm, given its active species profiles' terminology maps. */
+export function wordsFor(profiles: unknown[]): Terminology {
+  if (profiles.length === 0) return DEFAULT_TERMINOLOGY;
+  if (profiles.length > 1) return AMBIGUOUS_TERMINOLOGY;
+  return terminologyFrom(profiles[0]);
+}
 
 /** Every distinct permission the navigation needs, so each is asked for once. */
 export function permissionsNeeded(spec: NavGroupSpec[] = NAV_SPEC): Permission[] {
