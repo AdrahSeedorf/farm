@@ -7,10 +7,14 @@ import {
   activeWithdrawals,
   unstatedWithdrawals,
   clearFor,
+  standingFor,
   WITHDRAWABLE_EVENT_TYPES,
   type ActiveWithdrawal,
   type UnstatedWithdrawal,
+  type WithdrawalStanding,
 } from '@/lib/health-schedule';
+
+export { standingFor, type WithdrawalStanding } from '@/lib/health-schedule';
 
 /**
  * Withdrawal periods — ADRAH Farms
@@ -32,10 +36,16 @@ import {
  */
 
 export class WithdrawalError extends Error {
-  readonly clearsOn: Date;
+  /**
+   * NULL IS A REAL ANSWER HERE, and it is the dangerous one: a restriction with
+   * no clearing date, because nobody recorded what the label said. It does not
+   * lift on its own, and a caller that treats null as "not restricted" is the
+   * bug this field used to cause.
+   */
+  readonly clearsOn: Date | null;
   readonly kind: 'EGGS' | 'MEAT';
 
-  constructor(message: string, kind: 'EGGS' | 'MEAT', clearsOn: Date) {
+  constructor(message: string, kind: 'EGGS' | 'MEAT', clearsOn: Date | null) {
     super(message);
     this.name = 'WithdrawalError';
     this.kind = kind;
@@ -195,19 +205,10 @@ export async function assertSaleAllowed(
   const state = await flockWithdrawals(principal, flockId, asOf);
   if (!state) return;
 
-  const clearsOn = kind === 'EGGS' ? state.eggsClearOn : state.meatClearsOn;
-  if (!clearsOn) return;
+  const standing = standingFor(state, kind);
+  if (!standing.blocked) return;
 
-  const blocking = state.withdrawals.filter((w) => w.kind === kind);
-  const names = [...new Set(blocking.map((w) => w.name))].join(', ');
-  const what = kind === 'EGGS' ? 'Eggs' : 'Birds';
-
-  throw new WithdrawalError(
-    `${what} from ${state.houseName ?? state.flockCode} cannot be sold until ` +
-      `${clearsOn.toISOString().slice(0, 10)} — withdrawal period after ${names}.`,
-    kind,
-    clearsOn,
-  );
+  throw new WithdrawalError(standing.reason, kind, standing.clearsOn);
 }
 
 /** The same question, answered without throwing, for rendering a screen. */
@@ -216,8 +217,8 @@ export async function saleAllowed(
   flockId: string,
   kind: 'EGGS' | 'MEAT',
   asOf: Date = new Date(),
-): Promise<{ allowed: boolean; clearsOn: Date | null }> {
+): Promise<WithdrawalStanding> {
   const state = await flockWithdrawals(principal, flockId, asOf);
-  const clearsOn = !state ? null : kind === 'EGGS' ? state.eggsClearOn : state.meatClearsOn;
-  return { allowed: clearsOn === null, clearsOn };
+  if (!state) return { blocked: false, clearsOn: null, reason: '' };
+  return standingFor(state, kind);
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { activeWithdrawals, clearFor, withdrawalClearsOn } from '../health-schedule';
+import { standingFor } from '../health-schedule';
 
 const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 
@@ -103,5 +104,109 @@ describe('deciding whether produce may be sold', () => {
   it('says nothing about a flock that has had nothing', () => {
     expect(activeWithdrawals([], d('2026-09-08'))).toEqual([]);
     expect(clearFor([], 'EGGS')).toBeNull();
+  });
+});
+
+/**
+ * THE GATE ITSELF.
+ *
+ * These exist because the comment at the top of this file was wrong. The gate
+ * was NOT a thin wrapper over the arithmetic above — it read `eggsClearOn` and
+ * returned early when that was null, which is also what null means when nobody
+ * recorded a withdrawal period at all. So a flock treated with a product whose
+ * label was never read produced eggs that went straight into saleable stock,
+ * while the order screen, reading the same data through a different filter,
+ * refused to sell a single egg on the farm.
+ */
+describe('the sale gate', () => {
+  const house = (over: Partial<Parameters<typeof standingFor>[0]> = {}) => ({
+    flockCode: 'FLK-2026-01',
+    houseName: 'House A',
+    withdrawals: [],
+    unstated: [],
+    eggsClearOn: null,
+    meatClearsOn: null,
+    ...over,
+  });
+
+  const unstatedEggs = [
+    { name: 'Oxytetracycline', kind: 'EGGS' as const, treatedOn: d('2026-11-02'), daysSince: 1 },
+  ];
+
+  it('lets a clean flock sell', () => {
+    expect(standingFor(house(), 'EGGS').blocked).toBe(false);
+  });
+
+  it('blocks a dated withdrawal and says when it lifts', () => {
+    const standing = standingFor(
+      house({
+        eggsClearOn: d('2026-09-08'),
+        withdrawals: activeWithdrawals(
+          [
+            {
+              name: 'Antibiotic course',
+              occurredOn: d('2026-09-01'),
+              eggWithdrawalDays: 7,
+              meatWithdrawalDays: 14,
+            },
+          ],
+          d('2026-09-05'),
+        ),
+      }),
+      'EGGS',
+    );
+    expect(standing.blocked).toBe(true);
+    expect(standing.clearsOn).toEqual(d('2026-09-08'));
+    expect(standing.reason).toContain('2026-09-08');
+    expect(standing.reason).toContain('Antibiotic course');
+  });
+
+  /**
+   * THE REGRESSION. A treatment recorded with the withdrawal box left blank.
+   * Before the fix this returned "not blocked" and the eggs were banked as
+   * saleable with nothing shown on any screen.
+   */
+  it('BLOCKS a treatment whose withdrawal period nobody recorded', () => {
+    const standing = standingFor(house({ unstated: unstatedEggs }), 'EGGS');
+    expect(standing.blocked).toBe(true);
+  });
+
+  it('gives an unknown period NO clearing date, because it does not lift on its own', () => {
+    expect(standingFor(house({ unstated: unstatedEggs }), 'EGGS').clearsOn).toBeNull();
+  });
+
+  it('tells somebody what to do about it, naming the product and the house', () => {
+    const reason = standingFor(house({ unstated: unstatedEggs }), 'EGGS').reason;
+    expect(reason).toContain('House A');
+    expect(reason).toContain('Oxytetracycline');
+    expect(reason).toContain('reads the label');
+  });
+
+  /**
+   * An unknown EGG period must not quietly restrict meat, and vice versa. They
+   * are separate labels and separate decisions.
+   */
+  it('keeps an unknown period on its own kind', () => {
+    expect(standingFor(house({ unstated: unstatedEggs }), 'MEAT').blocked).toBe(false);
+  });
+
+  it('blocks meat whose period nobody recorded', () => {
+    const unstatedMeat = [
+      { name: 'Ivermectin', kind: 'MEAT' as const, treatedOn: d('2026-11-02'), daysSince: 1 },
+    ];
+    expect(standingFor(house({ unstated: unstatedMeat }), 'MEAT').blocked).toBe(true);
+  });
+
+  /**
+   * Unknown wins over a dated period that has already cleared — the silence is
+   * still a silence, and it is the restriction with no end.
+   */
+  it('reports the unknown rather than a cleared date', () => {
+    const standing = standingFor(
+      house({ unstated: unstatedEggs, eggsClearOn: null }),
+      'EGGS',
+    );
+    expect(standing.clearsOn).toBeNull();
+    expect(standing.reason).toContain('Nobody recorded');
   });
 });

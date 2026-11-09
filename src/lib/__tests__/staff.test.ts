@@ -9,12 +9,33 @@ import {
   reachSentence,
 } from '../staff';
 import { ROLES, ROLE_PERMISSIONS } from '../rbac';
+import { UNAVAILABLE_ROLES } from '../staff';
 
 describe('nobody may grant what they do not hold', () => {
-  it('THE OWNER MAY GRANT EVERY ROLE, including another owner', () => {
+  it('THE OWNER MAY GRANT EVERY ROLE THE SYSTEM CAN HONOUR, including another owner', () => {
+    expect(grantableRoles(['owner'])).toEqual(
+      ROLES.filter((r) => !UNAVAILABLE_ROLES.includes(r)),
+    );
     // The only route to a second owner, and it has to exist — a farm with one
     // owner and no way to make another is one lost phone from a locked door.
-    expect(grantableRoles(['owner'])).toEqual([...ROLES]);
+    expect(grantableRoles(['owner'])).toContain('owner');
+  });
+
+  /**
+   * A ROLE THAT CANNOT KEEP ITS PROMISE IS NOT OFFERED.
+   *
+   * `customer` is described on the staff screen as "their own orders and
+   * nothing else". Nothing links a User to a Customer, so `listOrders` scopes
+   * by organisation and site and returns every order on the farm. An owner
+   * giving a wholesale buyer a login handed them every rival buyer's name and
+   * phone number, and the ability to open orders in those names.
+   *
+   * This stays failing until `User.customerId` exists AND `listOrders` requires
+   * it for anybody holding the role — not before.
+   */
+  it('refuses to offer a role the system cannot honour', () => {
+    expect(grantableRoles(['owner'])).not.toContain('customer');
+    expect(roleGrantErrors(['owner'], ['customer'])).not.toEqual([]);
   });
 
   it('A MANAGER MAY NOT GRANT OWNER', () => {

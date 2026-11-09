@@ -30,9 +30,34 @@ import { pinIsPermittedFor } from '@/lib/pin';
  * The owner holds every permission, so the owner may grant every role — which
  * is the intended and only route to creating another owner.
  */
+/**
+ * Roles the system defines but cannot yet honour, so nobody may be given one.
+ *
+ * ── WHY `customer` IS HERE ─────────────────────────────────────────────────
+ *
+ * The role is described as "their own orders, nothing internal" and the staff
+ * screen offered it with exactly that promise. The promise could not be kept:
+ * nothing in the schema links a `User` to a `Customer`, so "their own" has no
+ * expression, and `listOrders` scopes by organisation and site alone.
+ *
+ * An owner who ticked the box to give a wholesale buyer a login handed them
+ * every order on the farm — each competing buyer's business name, contact name
+ * and phone number — and the ability to open draft orders in a rival's name.
+ * Money was correctly withheld; the buyer list was not.
+ *
+ * It comes back when `User.customerId` exists and `listOrders` requires it for
+ * anybody holding this role. Until then the box is not offered, because a role
+ * that cannot keep its promise is worse than a role that does not exist.
+ */
+export const UNAVAILABLE_ROLES: readonly Role[] = ['customer'];
+
 export function grantableRoles(actorRoles: Role[]): Role[] {
   const held = new Set<Permission>(actorRoles.flatMap((r) => ROLE_PERMISSIONS[r] ?? []));
-  return ROLES.filter((role) => ROLE_PERMISSIONS[role].every((p) => held.has(p)));
+  return ROLES.filter(
+    (role) =>
+      !UNAVAILABLE_ROLES.includes(role) &&
+      ROLE_PERMISSIONS[role].every((p) => held.has(p)),
+  );
 }
 
 /** Reasons a set of roles may not be granted by this person. These BLOCK. */

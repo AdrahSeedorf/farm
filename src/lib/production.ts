@@ -90,7 +90,29 @@ export function totalOf(lines: OutputLine[]): number {
  * `reconcile`.
  */
 export function collectionTotal(collection: Collection): number {
-  return collection.countedQuantity ?? totalOf(collection.lines);
+  return collectedFrom(collection.countedQuantity, totalOf(collection.lines));
+}
+
+/**
+ * The same rule, over the smallest shape that can answer the question.
+ *
+ * ── WHY THIS EXISTS SEPARATELY FROM `collectionTotal` ──────────────────────
+ *
+ * "How many eggs were collected" was computed three different ways. The screens
+ * used `collectionTotal` above. The period report summed the graded lines and
+ * ignored the counted figure entirely, so a house that recorded a count with no
+ * grade split — which the collection form explicitly allows — contributed
+ * nothing at all: 1,900 eggs on the production screen, zero on the report, and
+ * hen-day, saleable percentage and feed cost per egg all null for the period.
+ * The day-by-day CSV used a third rule, preferring the graded total, so two
+ * files downloaded from the same screen for the same week disagreed.
+ *
+ * The report reads rows out of the database in a different shape from the one
+ * the screens use, which is how the drift started. So the rule lives here, in
+ * terms of two numbers, and every caller passes its own two numbers.
+ */
+export function collectedFrom(countedQuantity: number | null, gradedTotal: number): number {
+  return countedQuantity ?? gradedTotal;
 }
 
 /** A whole day, across every collection recorded for it. */

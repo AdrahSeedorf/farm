@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   totalOf,
+  collectedFrom,
   collectionTotal,
   dayTotal,
   gradeTotals,
@@ -296,5 +297,47 @@ describe('what has not been recorded', () => {
 
   it('is nothing at all when the window runs backwards', () => {
     expect(missingDays([], d('2027-06-05'), d('2027-06-01'))).toEqual([]);
+  });
+});
+
+/**
+ * ONE RULE FOR "HOW MANY WERE COLLECTED".
+ *
+ * There were three. The screens used `collectionTotal`; the period report
+ * summed graded lines and ignored the count; the day-by-day CSV preferred the
+ * graded total. All three are now `collectedFrom`, so these assertions hold
+ * wherever the figure is shown.
+ */
+describe('the collected figure, wherever it is asked for', () => {
+  it('prefers the house count, because it was taken closest to the birds', () => {
+    // 1,900 counted in the house, 1,850 graded — 50 broke on the way.
+    expect(collectedFrom(1900, 1850)).toBe(1900);
+  });
+
+  it('falls back to the graded total when nobody counted in the house', () => {
+    expect(collectedFrom(null, 1850)).toBe(1850);
+  });
+
+  /**
+   * THE REGRESSION. The collection form allows a house count with no grade
+   * split. The report summed lines only, so this collection was worth 1,900 on
+   * the production screen and ZERO on the report — taking hen-day, saleable
+   * percentage and feed cost per egg to null for the whole period with it.
+   */
+  it('is not zero for a count with no grade split', () => {
+    expect(collectedFrom(1900, 0)).toBe(1900);
+  });
+
+  it('counts a genuine zero as zero rather than falling through', () => {
+    expect(collectedFrom(0, 1850)).toBe(0);
+  });
+
+  it('agrees with collectionTotal, which is the rule the screens use', () => {
+    const collection = {
+      sequence: 1,
+      countedQuantity: 1900,
+      lines: [{ gradeKey: 'large', quantity: 1850 }],
+    };
+    expect(collectionTotal(collection as never)).toBe(collectedFrom(1900, 1850));
   });
 });

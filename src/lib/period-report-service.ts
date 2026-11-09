@@ -6,6 +6,7 @@ import { pesewas, ZERO, type Pesewas } from '@/lib/money';
 import { round, ageInDays } from '@/lib/metrics';
 import { populationSeries, type PopulationEvent } from '@/lib/ledger';
 import { isLive } from '@/lib/dispatch';
+import { collectedFrom } from '@/lib/production';
 import { lineTotal } from '@/lib/sales';
 import {
   EMPTY_FIGURES,
@@ -95,7 +96,7 @@ export async function figuresFor(
   const dayBefore = new Date(period.from.getTime() - DAY);
 
   const [
-    lines,
+    records,
     movements,
     dispatches,
     events,
@@ -105,23 +106,46 @@ export async function figuresFor(
     feed,
   ] = await Promise.all([
     // --- production: collections in the period, by grade -------------------
-    db.productionLine.findMany({
+    /**
+     * RECORDS, NOT LINES. The collected figure follows `collectedFrom`: the
+     * house count wins where there is one, because it was taken closest to the
+     * birds. Reading lines alone made a count-only collection worth zero here
+     * while the production screen showed it in full.
+     */
+    db.productionRecord.findMany({
       where: {
-        record: {
-          onDate: { gte: period.from, lte: period.to },
-          animalGroup: { site: orgFilter(principal), ...siteFilter(principal) },
-        },
+        onDate: { gte: period.from, lte: period.to },
+        animalGroup: { site: orgFilter(principal), ...siteFilter(principal) },
       },
       select: {
-        quantityBase: true,
-        grade: { select: { isSaleable: true, itemId: true } },
+        countedBase: true,
+        lines: {
+          select: {
+            quantityBase: true,
+            grade: { select: { isSaleable: true, itemId: true } },
+          },
+        },
       },
     }),
 
     // --- the store: what moved, and why ------------------------------------
     itemIds.length > 0 && stockLocationIds.length > 0
       ? db.stockMovement.groupBy({
-          by: ['type'],
+          /**
+           * BY SOURCE AS WELL AS TYPE.
+           *
+           * Un-posting a corrected collection writes an ADJUSTMENT, not a
+           * negative PRODUCTION — correctly, because that is what it is. But
+           * the reconciliation summed only PRODUCTION and RETURN on the store
+           * side while the house side saw the correction's negative lines, so
+           * every corrected collection in the period produced a false gap and
+           * the report sent somebody looking for a receipt nobody had entered.
+           *
+           * `sourceType` tells the two kinds of ADJUSTMENT apart: one un-posts
+           * a collection, the other is a stock take finding real discrepancy —
+           * and that second one must keep showing as a gap, because it is one.
+           */
+          by: ['type', 'sourceType'],
           where: {
             itemId: { in: itemIds },
             stockLocationId: { in: stockLocationIds },
@@ -129,7 +153,9 @@ export async function figuresFor(
           },
           _sum: { deltaBase: true },
         })
-      : Promise.resolve([] as { type: string; _sum: { deltaBase: number | null } }[]),
+      : Promise.resolve(
+          [] as { type: string; sourceType: string | null; _sum: { deltaBase: number | null } }[],
+        ),
 
     // --- what went out, and what it was agreed at --------------------------
     db.dispatch.findMany({
@@ -187,13 +213,24 @@ export async function figuresFor(
   // --- production -----------------------------------------------------------
   let collected = 0;
   let saleable = 0;
-  // Only grades LINKED TO A STORE ITEM can be checked against the store. See
-  // reconcile() — counting cracked eggs here would report a gap every day.
+  /**
+   * Only grades LINKED TO A STORE ITEM can be checked against the store. See
+   * reconcile() — counting cracked eggs here would report a gap every day.
+   *
+   * This one stays summed from the LINES even though `collected` does not: the
+   * store only ever received what was graded into it, so comparing a house
+   * count against the store would report a gap for every egg that broke on the
+   * way to the egg room.
+   */
   let collectedHeld = 0;
-  for (const line of lines) {
-    collected += line.quantityBase;
-    if (line.grade.isSaleable) saleable += line.quantityBase;
-    if (line.grade.itemId) collectedHeld += line.quantityBase;
+  for (const record of records) {
+    let graded = 0;
+    for (const line of record.lines) {
+      graded += line.quantityBase;
+      if (line.grade.isSaleable) saleable += line.quantityBase;
+      if (line.grade.itemId) collectedHeld += line.quantityBase;
+    }
+    collected += collectedFrom(record.countedBase, graded);
   }
 
   // --- the store ------------------------------------------------------------
@@ -202,12 +239,36 @@ export async function figuresFor(
       .filter((m) => types.includes(m.type as string))
       .reduce((n, m) => n + (m._sum.deltaBase ?? 0), 0);
 
-  // PRODUCTION is the only movement that puts produce in. RETURN puts back what
-  // a reversed load took out, so it belongs on the same side of the sum — a
-  // reversal is not a collection, but it is produce arriving in the store.
-  const intoStore = round(sumOf('PRODUCTION', 'RETURN'), 2) ?? 0;
-  // Signed negative in the ledger; reported as a positive quantity that left.
-  const outOfStore = round(Math.abs(sumOf('SALE')), 2) ?? 0;
+  /** The un-posting of a corrected collection, which belongs with the collections. */
+  const correctionsOut = movements
+    .filter((m) => (m.type as string) === 'ADJUSTMENT' && m.sourceType === 'productionRecord')
+    .reduce((n, m) => n + (m._sum.deltaBase ?? 0), 0);
+
+  /**
+   * A RETURN IS NOT PRODUCE ARRIVING FROM THE HOUSES — it is a load that left
+   * and came back, so it cancels on the OUTBOUND side.
+   *
+   * It used to be added to `intoStore`, on the reasoning that produce arriving
+   * is produce arriving. That is true of the stock balance and false of the
+   * reconciliation, which asks one question: did everything counted in the
+   * houses reach the store? Reversing a 300-egg load made the store look 300
+   * heavier than the collections explained, and the report answered "the store
+   * received 300 more than the houses counted — check for a receipt recorded
+   * against the produce item by hand". There was no receipt to find.
+   *
+   * Netting it against the sale leaves the closing balance identical and makes
+   * both figures mean what the report says they mean.
+   */
+  const returned = sumOf('RETURN');
+
+  // PRODUCTION is the only movement that puts produce in from the houses. The
+  // correction adjustments are negative and are ADDED, not subtracted: they
+  // cancel the PRODUCTION rows the corrected collection posted, exactly as the
+  // reversal record's negative lines cancel it on the house side.
+  const intoStore = round(sumOf('PRODUCTION') + correctionsOut, 2) ?? 0;
+  // Signed negative in the ledger; reported as a positive quantity that left,
+  // less anything that came back.
+  const outOfStore = round(Math.abs(sumOf('SALE')) - returned, 2) ?? 0;
   const wasted = round(Math.abs(sumOf('DAMAGE', 'EXPIRY')), 2) ?? 0;
 
   // --- loads ----------------------------------------------------------------
@@ -433,7 +494,10 @@ export async function dailySeriesFor(
       let saleable = 0;
       for (const record of dayRecords) {
         const graded = record.lines.reduce((sum, l) => sum + l.quantityBase, 0);
-        collected += graded > 0 ? graded : (record.countedBase ?? 0);
+        // The same rule as the summary and the screens. This used to prefer the
+        // graded total, so the day-by-day CSV disagreed with the summary CSV
+        // whenever eggs broke between the house and the egg room.
+        collected += collectedFrom(record.countedBase, graded);
         saleable += record.lines
           .filter((l) => saleableGrades.has(l.productionGradeId))
           .reduce((sum, l) => sum + l.quantityBase, 0);

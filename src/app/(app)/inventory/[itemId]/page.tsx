@@ -38,6 +38,19 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
   const { principal, allowed } = await pageGuard('inventory:view');
   if (!allowed) return <Forbidden area="the store" roles={principal.roles} />;
 
+  /**
+   * WHAT THE STORE HOLDS IS NOT WHAT IT COST.
+   *
+   * `inventory:view` is held by the storekeeper and the supervisor, both of
+   * whom are documented as seeing "no margins, no prices". This page was the
+   * one place that showed them anyway: the weighted cost per unit, the cedi
+   * value on hand, and a per-batch cost column — reachable from a link on the
+   * list they are entitled to, no URL guessing needed.
+   *
+   * Every other screen that prints a cost figure already gates it this way.
+   */
+  const canSeeCost = await currentUserCan('finance:view');
+
   const { itemId } = await params;
   const item = await itemById(principal, itemId);
   if (!item) notFound();
@@ -115,19 +128,21 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
             />
           </dd>
         </div>
+        {canSeeCost ? (
         <div className="rounded-card border border-border-default bg-surface-card p-4">
-          <dt className="text-[12px] font-bold uppercase tracking-[0.14em] text-text-muted">
-            Cost of what is here
-          </dt>
-          <dd className="tabular mt-1 text-xl font-bold text-text-primary">
-            {cost === null ? '—' : `${formatGHS(pesewas(cost))} / ${base}`}
-          </dd>
-          <dd className="mt-1.5 text-[13px] text-text-secondary">
-            {cost === null
-              ? 'No price recorded on the stock held.'
-              : 'Weighted across the batches on hand.'}
-          </dd>
-        </div>
+            <dt className="text-[12px] font-bold uppercase tracking-[0.14em] text-text-muted">
+              Cost of what is here
+            </dt>
+            <dd className="tabular mt-1 text-xl font-bold text-text-primary">
+              {cost === null ? '—' : `${formatGHS(pesewas(cost))} / ${base}`}
+            </dd>
+            <dd className="mt-1.5 text-[13px] text-text-secondary">
+              {cost === null
+                ? 'No price recorded on the stock held.'
+                : 'Weighted across the batches on hand.'}
+            </dd>
+          </div>
+        ) : null}
         <div className="rounded-card border border-border-default bg-surface-card p-4">
           <dt className="text-[12px] font-bold uppercase tracking-[0.14em] text-text-muted">
             Days of cover
@@ -144,19 +159,21 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
               : ''}
           </dd>
         </div>
+        {canSeeCost ? (
         <div className="rounded-card border border-border-default bg-surface-card p-4">
-          <dt className="text-[12px] font-bold uppercase tracking-[0.14em] text-text-muted">
-            Value on hand
-          </dt>
-          <dd className="tabular mt-1 text-xl font-bold text-text-primary">
-            {cost === null ? '—' : formatGHS(pesewas(Math.round(inBatches * cost)))}
-          </dd>
-          <dd className="mt-1.5 text-[13px] text-text-secondary">
-            {Math.abs(inBatches - totalOnHand) > 0.001
-              ? `Covers the ${show(inBatches)} held in named batches.`
-              : 'At the cost above.'}
-          </dd>
-        </div>
+            <dt className="text-[12px] font-bold uppercase tracking-[0.14em] text-text-muted">
+              Value on hand
+            </dt>
+            <dd className="tabular mt-1 text-xl font-bold text-text-primary">
+              {cost === null ? '—' : formatGHS(pesewas(Math.round(inBatches * cost)))}
+            </dd>
+            <dd className="mt-1.5 text-[13px] text-text-secondary">
+              {Math.abs(inBatches - totalOnHand) > 0.001
+                ? `Covers the ${show(inBatches)} held in named batches.`
+                : 'At the cost above.'}
+            </dd>
+          </div>
+        ) : null}
       </dl>
 
       {expired.length > 0 ? (
@@ -205,7 +222,9 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
                   <th className="px-4 py-2.5 font-semibold">Batch</th>
                   <th className="px-4 py-2.5 font-semibold">Expires</th>
                   <th className="px-4 py-2.5 text-right font-semibold">On hand</th>
-                  <th className="px-4 py-2.5 text-right font-semibold">Cost</th>
+                  {canSeeCost ? (
+                    <th className="px-4 py-2.5 text-right font-semibold">Cost</th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border-default">
@@ -214,11 +233,13 @@ export default async function ItemPage({ params }: { params: Promise<{ itemId: s
                     <td className="px-4 py-2.5 font-mono text-[13px]">{b.batchNumber}</td>
                     <td className="px-4 py-2.5">{b.expiresOn ? day(b.expiresOn) : '—'}</td>
                     <td className="tabular px-4 py-2.5 text-right">{show(b.onHand)}</td>
-                    <td className="tabular px-4 py-2.5 text-right">
-                      {b.unitCostPesewas === null || b.unitCostPesewas === undefined
-                        ? '—'
-                        : `${formatGHS(pesewas(b.unitCostPesewas))} / ${base}`}
-                    </td>
+                    {canSeeCost ? (
+                      <td className="tabular px-4 py-2.5 text-right">
+                        {b.unitCostPesewas === null || b.unitCostPesewas === undefined
+                          ? '—'
+                          : `${formatGHS(pesewas(b.unitCostPesewas))} / ${base}`}
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>

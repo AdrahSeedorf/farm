@@ -21,6 +21,7 @@ import {
 import { priceFor } from '@/lib/pricing';
 import { allPrices } from '@/lib/product-service';
 import { withdrawalsAcrossFlocks } from '@/lib/withdrawal-service';
+import { standingFor } from '@/lib/health-schedule';
 
 /**
  * Sales order service — ADRAH Farms
@@ -300,14 +301,22 @@ export async function restrictedFlocks(
   const rows = await withdrawalsAcrossFlocks(principal, asOf);
   return (
     rows
-      // A dated egg withdrawal OR an unknown one. The second was missing, which
-      // meant a flock treated with an unrecorded product was sellable.
-      .filter((f) => f.eggsClearOn !== null || f.eggsUnknown)
-      .map((f) => ({
-        flockId: f.flockId,
-        name: f.houseName ?? f.flockCode,
+      /**
+       * ONE DECISION, SHARED WITH THE COLLECTION GATE.
+       *
+       * This filter used to be written out here — a dated withdrawal OR an
+       * unknown one — and `assertSaleAllowed` had its own, which checked only
+       * the dated half. The two disagreed for months: this screen refused to
+       * sell eggs that the collection screen had already banked as saleable.
+       * Both now ask `standingFor`, so they cannot drift again.
+       */
+      .map((f) => ({ flock: f, standing: standingFor(f, 'EGGS') }))
+      .filter(({ standing }) => standing.blocked)
+      .map(({ flock, standing }) => ({
+        flockId: flock.flockId,
+        name: flock.houseName ?? flock.flockCode,
         // Null here means unknown, never "clear". See RestrictedFlock.
-        clearsOn: f.eggsUnknown ? null : (f.eggsClearOn as Date),
+        clearsOn: standing.clearsOn,
       }))
   );
 }

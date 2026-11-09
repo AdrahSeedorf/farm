@@ -291,6 +291,71 @@ export function unstatedSentence(unstated: UnstatedWithdrawal[]): string {
   return `Nobody recorded whether ${names} has a withdrawal period. Until somebody reads the label and records it — including recording none, where the label says none applies — nothing from this house can be sold.`;
 }
 
+export interface WithdrawalStanding {
+  blocked: boolean;
+  /**
+   * When the restriction lifts. Null while `blocked` is true means it does not
+   * lift on its own — somebody has to read a label.
+   */
+  clearsOn: Date | null;
+  /** Empty when nothing is blocking. */
+  reason: string;
+}
+
+/**
+ * May this flock's produce be sold? One decision, in one place.
+ *
+ * ── THE BUG THIS EXISTS TO MAKE IMPOSSIBLE ─────────────────────────────────
+ *
+ * There were two gates built from the same data, and they disagreed. The sales
+ * screen refused a flock with an unrecorded withdrawal period; the collection
+ * screen let the same eggs into saleable stock, because it read only
+ * `eggsClearOn` and returned early when that was null.
+ *
+ * Null meant two different things — "no restriction" and "a restriction with no
+ * end date" — and the gate guarding entry into saleable stock took the generous
+ * reading. A flock treated with a product whose label nobody read produced eggs
+ * that were banked as fit for sale, with no warning shown anywhere, while the
+ * order screen refused to sell any egg on the farm.
+ *
+ * So both gates now call this, and it is pure: given the state, the answer is
+ * the same for a screen, a collection and an order line.
+ *
+ * UNKNOWN IS CHECKED FIRST, because it is the restriction that cannot expire.
+ */
+export function standingFor(
+  state: {
+    withdrawals: ActiveWithdrawal[];
+    unstated: UnstatedWithdrawal[];
+    eggsClearOn: Date | null;
+    meatClearsOn: Date | null;
+    houseName: string | null;
+    flockCode: string;
+  },
+  kind: 'EGGS' | 'MEAT',
+): WithdrawalStanding {
+  const where = state.houseName ?? state.flockCode;
+
+  const unstated = state.unstated.filter((u) => u.kind === kind);
+  if (unstated.length > 0) {
+    return { blocked: true, clearsOn: null, reason: `${where}: ${unstatedSentence(unstated)}` };
+  }
+
+  const clearsOn = kind === 'EGGS' ? state.eggsClearOn : state.meatClearsOn;
+  if (!clearsOn) return { blocked: false, clearsOn: null, reason: '' };
+
+  const names = [...new Set(state.withdrawals.filter((w) => w.kind === kind).map((w) => w.name))];
+  const what = kind === 'EGGS' ? 'Eggs' : 'Birds';
+
+  return {
+    blocked: true,
+    clearsOn,
+    reason:
+      `${what} from ${where} cannot be sold until ` +
+      `${clearsOn.toISOString().slice(0, 10)} — withdrawal period after ${names.join(', ')}.`,
+  };
+}
+
 export function activeWithdrawals(
   sources: WithdrawalSource[],
   asOf: Date,

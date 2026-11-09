@@ -222,3 +222,70 @@ describe('the ledger writers verify ownership themselves', () => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// 6. NO SCREEN PRINTS MONEY WITHOUT ASKING WHETHER THIS PERSON MAY SEE IT
+// ---------------------------------------------------------------------------
+
+/**
+ * The role matrix is partitioned around money. A storekeeper and a supervisor
+ * are both documented as seeing "no margins, no prices", and the application
+ * means it everywhere except where somebody forgot — which is not a hole a
+ * permission check can close, because the page's own guard passes. The figure
+ * is simply rendered.
+ *
+ * This caught `/inventory/[itemId]`, which guarded on `inventory:view` alone
+ * and then printed the weighted cost per unit, the cedi value of stock on hand
+ * and a per-batch cost column, to exactly the two roles denied every financial
+ * permission. There was no URL to guess: the link was on the list page they are
+ * entitled to open.
+ *
+ * The rule is deliberately crude — a page that formats cedis must mention a
+ * money permission somewhere — because the alternative is deciding, per render
+ * branch, whether a figure is "really" money. A crude rule that fires is worth
+ * more than a precise one nobody can evaluate.
+ */
+describe('no page shows money to somebody denied money', () => {
+  const MONEY_PERMISSIONS = ['finance:view', 'price:view', 'payment:view', 'finance:export'];
+
+  const NOT_MONEY = [
+    {
+      file: 'src/app/(app)/pricing/page.tsx',
+      why: 'The price list is the subject of the screen, and the route is already gated on product:view with price:edit for every change.',
+    },
+    {
+      file: 'src/app/(app)/purchases/page.tsx',
+      why: 'What the farm agreed to pay a supplier is the storekeeper\'s own work, not a margin. Checking a delivery against the agreed price is the control that receiving exists to perform, and it cannot be done by somebody who may not see the price.',
+    },
+    {
+      file: 'src/app/(app)/purchases/[orderId]/page.tsx',
+      why: 'Same as the list: the storekeeper places and receives this order, and the agreed price is the figure they check the delivery note against. Selling prices and margins remain behind price:view and finance:view.',
+    },
+  ];
+
+  it('resolves a money permission on every page that formats cedis', () => {
+    const exempt = new Set(NOT_MONEY.map((e) => e.file));
+    const offenders: string[] = [];
+
+    for (const file of walk(APP, (name) => name === 'page.tsx')) {
+      if (exempt.has(file)) continue;
+      const src = read(file);
+      if (!src.includes('formatGHS')) continue;
+      if (MONEY_PERMISSIONS.some((p) => src.includes(p))) continue;
+      offenders.push(file);
+    }
+
+    expect(
+      offenders,
+      `These pages print cedi figures without asking whether the viewer may see money:\n${offenders.join('\n')}\n\n` +
+        "Resolve one of currentUserCan('finance:view') or 'price:view' and render the figure only when it is true.",
+    ).toEqual([]);
+  });
+
+  it('names a reason for every exemption, so the list cannot rot into a backlog', () => {
+    for (const exemption of NOT_MONEY) {
+      expect(exemption.why.length).toBeGreaterThan(40);
+      expect(() => read(exemption.file)).not.toThrow();
+    }
+  });
+});
