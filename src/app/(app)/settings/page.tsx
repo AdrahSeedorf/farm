@@ -19,6 +19,7 @@ export default async function SettingsPage() {
   if (!org) return <Forbidden area="settings" roles={principal.roles} />;
 
   const canManage = await currentUserCan('settings:manage');
+  const canSeePrices = await currentUserCan('product:view');
 
   const breeds = await db.breed.findMany({
     where: { organisationId: principal.organisationId, isActive: true },
@@ -163,6 +164,49 @@ export default async function SettingsPage() {
             <BreedForm />
           </div>
         ) : null}
+      </section>
+
+      {/*
+        PRICES AND FARMS LIVE HERE NOW.
+        Both used to sit in the sidebar beside the screens somebody opens every
+        day. They are set once and changed a few times a year, so they made the
+        daily list longer for everybody and told nobody anything. They are
+        reached from here, where the grades, breeds and thresholds already were.
+      */}
+      {canSeePrices ? (
+        <section className="mt-6 rounded-card border border-border-default bg-surface-card p-6">
+          <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-brand-accent">
+            Prices
+          </h2>
+          <p className="mt-3 text-[14px] text-text-secondary">
+            The list price for each product, and the agreed price for any buyer who has one.
+            A price is never changed in place — a new one starts on the day you set it, so an
+            order written last month still shows what was actually agreed.
+          </p>
+          <Link
+            href="/pricing"
+            className="mt-4 inline-flex min-h-touch items-center rounded-control border border-border-strong bg-surface-card px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
+          >
+            Set prices
+          </Link>
+        </section>
+      ) : null}
+
+      <section className="mt-6 rounded-card border border-border-default bg-surface-card p-6">
+        <h2 className="text-[12px] font-semibold uppercase tracking-[0.14em] text-brand-accent">
+          Farms and houses
+        </h2>
+        <p className="mt-3 text-[14px] text-text-secondary">
+          Where the birds are kept, and which staff may see which site. Adding a second farm
+          changes who sees what everywhere at once, which is why it is set up here rather than
+          in passing.
+        </p>
+        <Link
+          href="/sites"
+          className="mt-4 inline-flex min-h-touch items-center rounded-control border border-border-strong bg-surface-card px-4 text-[15px] font-semibold text-text-primary hover:bg-surface-sunken"
+        >
+          Farms and houses
+        </Link>
       </section>
 
       <section className="mt-6 rounded-card border border-border-default bg-surface-card p-6">

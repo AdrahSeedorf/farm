@@ -1,4 +1,4 @@
-import { readdirSync, existsSync } from 'node:fs';
+import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -72,12 +72,36 @@ describe('the structure itself', () => {
 
     const reachable = new Set(hrefsIn().map((h) => h.slice(1)));
 
-    const deliberate: Record<string, string> = {
-      // Nothing yet. An entry here is a promise that somebody chose this.
+    /**
+     * A SCREEN OFF THE SIDEBAR MUST BE LINKED FROM SOMEWHERE THAT IS ON IT.
+     *
+     * This is not a list of excuses. Each entry names the page that carries the
+     * link, and the test below opens that page and checks the link is really
+     * there — so moving a screen out of the daily list and forgetting to put it
+     * anywhere fails exactly as loudly as never adding it at all.
+     */
+    const reachedFromElsewhere: Record<string, { linkedFrom: string; why: string }> = {
+      pricing: {
+        linkedFrom: 'src/app/(app)/settings/page.tsx',
+        why: 'Set once and changed a few times a year. In the daily list it made the list longer for everybody and told nobody anything.',
+      },
+      sites: {
+        linkedFrom: 'src/app/(app)/settings/page.tsx',
+        why: 'Adding a farm changes who can see what everywhere at once, which is a setup decision rather than a daily one.',
+      },
     };
 
-    const orphans = routes.filter((r) => !reachable.has(r) && !(r in deliberate));
+    const orphans = routes.filter((r) => !reachable.has(r) && !(r in reachedFromElsewhere));
     expect(orphans, `no way to reach: ${orphans.join(', ')}`).toEqual([]);
+
+    // The promise above, checked rather than taken on trust.
+    const broken = Object.entries(reachedFromElsewhere).filter(
+      ([route, { linkedFrom }]) => !readFileSync(join(process.cwd(), linkedFrom), 'utf8').includes(`href="/${route}"`),
+    );
+    expect(
+      broken.map(([route, { linkedFrom }]) => `${route} is not linked from ${linkedFrom}`),
+      'A screen taken out of the navigation must still be reachable from the page that claims to link it.',
+    ).toEqual([]);
   });
 
   it('points every link at a screen that exists', () => {

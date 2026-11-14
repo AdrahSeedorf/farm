@@ -1,6 +1,7 @@
 import type { Permission } from '@/lib/rbac';
 import { DEFAULT_TERMINOLOGY, terminologyFrom, type Terminology } from '@/lib/terminology';
 import { ALERT_RULES, RULE_CATALOGUE } from '@/lib/alerts';
+import type { IconName } from '@/components/app/NavIcon';
 
 /**
  * Navigation model — ADRAH Farms
@@ -41,6 +42,12 @@ type Word = string | ((words: Terminology) => string);
 export interface NavItemSpec {
   href: string;
   label: Word;
+  /**
+   * A SECOND signal beside the word, never a replacement for it. Typed against
+   * the icon set, so a name that does not exist fails the build rather than
+   * rendering a hole.
+   */
+  icon: IconName;
   /** A list means ANY of them is enough. */
   permission: Permission | Permission[];
 }
@@ -57,6 +64,7 @@ export interface NavGroupSpec {
 export interface NavItem {
   href: string;
   label: string;
+  icon: IconName;
   permission: Permission | Permission[];
 }
 
@@ -96,7 +104,7 @@ export const NAV_SPEC: NavGroupSpec[] = [
     // them would be a label on a reflex.
     heading: null,
     items: [
-      { href: '/daily', label: 'Today', permission: 'dailyRecord:view' },
+      { href: '/daily', label: 'Today', icon: 'today', permission: 'dailyRecord:view' },
       /**
        * A LIST, AND IT HAS TO BE ONE. Every alert rule carries its own
        * permission, so the screen shows each reader the subset they hold rather
@@ -107,31 +115,32 @@ export const NAV_SPEC: NavGroupSpec[] = [
       {
         href: '/alerts',
         label: 'Alerts',
+        icon: 'alerts',
         permission: ALERT_RULES.map((r) => RULE_CATALOGUE[r].permission),
       },
-      { href: '/dashboard', label: 'Dashboard', permission: 'report:view' },
-      { href: '/reports', label: 'Report', permission: 'report:view' },
+      { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', permission: 'report:view' },
+      { href: '/reports', label: 'Report', icon: 'report', permission: 'report:view' },
     ],
   },
   {
     heading: animals,
     items: [
-      { href: '/flocks', label: (w) => w.animalGroupPlural, permission: 'flock:view' },
-      { href: '/production', label: produce, permission: 'production:view' },
-      { href: '/health', label: 'Health', permission: 'health:view' },
+      { href: '/flocks', label: (w) => w.animalGroupPlural, icon: 'flocks', permission: 'flock:view' },
+      { href: '/production', label: produce, icon: 'production', permission: 'production:view' },
+      { href: '/health', label: 'Health', icon: 'health', permission: 'health:view' },
       // Daylength is husbandry, not medicine. The person who needs the
       // switch-on time is walking into the house at five in the morning and
       // should not have to know which section somebody filed it under.
-      { href: '/lighting', label: 'Lighting', permission: 'flock:view' },
-      { href: '/biosecurity', label: 'Biosecurity', permission: 'biosecurity:view' },
+      { href: '/lighting', label: 'Lighting', icon: 'lighting', permission: 'flock:view' },
+      { href: '/biosecurity', label: 'Biosecurity', icon: 'biosecurity', permission: 'biosecurity:view' },
     ],
   },
   {
     heading: 'Stock',
     items: [
-      { href: '/inventory', label: 'Store', permission: 'inventory:view' },
-      { href: '/purchases', label: 'Purchases', permission: 'procurement:view' },
-      { href: '/suppliers', label: 'Suppliers', permission: 'supplier:view' },
+      { href: '/inventory', label: 'Store', icon: 'store', permission: 'inventory:view' },
+      { href: '/purchases', label: 'Purchases', icon: 'purchases', permission: 'procurement:view' },
+      { href: '/suppliers', label: 'Suppliers', icon: 'suppliers', permission: 'supplier:view' },
     ],
   },
   {
@@ -139,40 +148,50 @@ export const NAV_SPEC: NavGroupSpec[] = [
     items: [
       // First, because it is the one somebody opens with a customer standing in
       // front of them.
-      { href: '/sell', label: 'Sell', permission: 'order:create' },
-      { href: '/orders', label: 'Orders', permission: 'order:view' },
-      { href: '/dispatch', label: 'Loads out', permission: 'delivery:view' },
-      { href: '/customers', label: 'Buyers', permission: 'customer:view' },
-      { href: '/enquiries', label: 'Enquiries', permission: 'customer:view' },
-      { href: '/pricing', label: 'Prices', permission: 'product:view' },
+      { href: '/sell', label: 'Sell', icon: 'sell', permission: 'order:create' },
+      { href: '/orders', label: 'Orders', icon: 'orders', permission: 'order:view' },
+      { href: '/dispatch', label: 'Loads out', icon: 'dispatch', permission: 'delivery:view' },
+      { href: '/customers', label: 'Buyers', icon: 'buyers', permission: 'customer:view' },
+      { href: '/enquiries', label: 'Enquiries', icon: 'enquiries', permission: 'customer:view' },
     ],
   },
   {
     heading: 'Money',
     items: [
-      { href: '/payments', label: 'Money in', permission: 'payment:view' },
-      { href: '/costs', label: 'Costs', permission: 'finance:view' },
+      { href: '/payments', label: 'Money in', icon: 'money', permission: 'payment:view' },
+      { href: '/costs', label: 'Costs', icon: 'costs', permission: 'finance:view' },
     ],
   },
   {
     heading: 'Jobs',
     items: [
-      { href: '/tasks', label: 'Tasks', permission: 'task:view' },
-      { href: '/incidents', label: 'Incidents', permission: 'incident:view' },
+      { href: '/tasks', label: 'Tasks', icon: 'tasks', permission: 'task:view' },
+      { href: '/incidents', label: 'Incidents', icon: 'incidents', permission: 'incident:view' },
     ],
   },
   {
     heading: 'Team',
     items: [
-      { href: '/attendance', label: 'Attendance', permission: 'attendance:view' },
-      { href: '/staff', label: 'People', permission: 'user:view' },
+      { href: '/attendance', label: 'Attendance', icon: 'attendance', permission: 'attendance:view' },
+      { href: '/staff', label: 'People', icon: 'people', permission: 'user:view' },
     ],
   },
   {
-    heading: 'Setup',
+    /**
+     * NO HEADING, AND ONE ITEM.
+     *
+     * Prices and Farms used to sit in the sidebar beside the screens somebody
+     * opens every day. They are set up once and changed a few times a year, and
+     * carrying them in the daily list made the list longer for everybody while
+     * telling nobody anything. They now live on the Settings page, beside the
+     * breeds, grades and alert thresholds that were already there.
+     *
+     * A heading over a single link is a label on a doorway, so Settings sits on
+     * its own at the bottom, where a setup screen belongs.
+     */
+    heading: null,
     items: [
-      { href: '/sites', label: 'Farms', permission: 'site:view' },
-      { href: '/settings', label: 'Settings', permission: 'settings:view' },
+      { href: '/settings', label: 'Settings', icon: 'settings', permission: 'settings:view' },
     ],
   },
 ];
@@ -248,7 +267,12 @@ export function buildNav(
        */
       if (wanted.length === 0) continue;
       if (!wanted.some((p) => granted.has(p))) continue;
-      items.push({ href: item.href, label: read(item.label, words), permission: item.permission });
+      items.push({
+        href: item.href,
+        label: read(item.label, words),
+        icon: item.icon,
+        permission: item.permission,
+      });
     }
     if (items.length > 0) out.push({ heading: group.heading ? read(group.heading, words) : null, items });
   }
